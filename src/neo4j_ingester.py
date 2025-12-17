@@ -1,0 +1,544 @@
+"""
+Neo4j Ingester
+Ingests parsed code structure into Neo4j graph database
+"""
+import os
+from typing import List, Dict, Any, Optional
+from neo4j import GraphDatabase
+from .models import ParsedCodebase, Relationship
+
+
+class Neo4jIngester:
+    """Handles ingestion of parsed code into Neo4j"""
+    
+    def __init__(self, uri: str = None, username: str = None, password: str = None):
+        self.uri = uri or os.getenv('NEO4J_URI', 'bolt://localhost:7687')
+        self.username = username or os.getenv('NEO4J_USERNAME', 'neo4j')
+        self.password = password or os.getenv('NEO4J_PASSWORD', 'password')
+        self.driver = None
+    
+    def connect(self):
+        """Establish connection to Neo4j"""
+        self.driver = GraphDatabase.driver(
+            self.uri, 
+            auth=(self.username, self.password)
+        )
+        # Test connection
+        with self.driver.session() as session:
+            session.run("RETURN 1")
+        print(f"Connected to Neo4j at {self.uri}")
+    
+    def close(self):
+        """Close the connection"""
+        if self.driver:
+            self.driver.close()
+    
+    def create_constraints(self):
+        """Create uniqueness constraints and indexes"""
+        constraints = [
+            "CREATE CONSTRAINT repo_id IF NOT EXISTS FOR (r:Repository) REQUIRE r.id IS UNIQUE",
+            "CREATE CONSTRAINT file_id IF NOT EXISTS FOR (f:File) REQUIRE f.id IS UNIQUE",
+            "CREATE CONSTRAINT module_id IF NOT EXISTS FOR (m:Module) REQUIRE m.id IS UNIQUE",
+            "CREATE CONSTRAINT class_id IF NOT EXISTS FOR (c:Class) REQUIRE c.id IS UNIQUE",
+            "CREATE CONSTRAINT function_id IF NOT EXISTS FOR (f:Function) REQUIRE f.id IS UNIQUE",
+            "CREATE CONSTRAINT variable_id IF NOT EXISTS FOR (v:Variable) REQUIRE v.id IS UNIQUE",
+            "CREATE CONSTRAINT import_id IF NOT EXISTS FOR (i:Import) REQUIRE i.id IS UNIQUE",
+            "CREATE CONSTRAINT interface_id IF NOT EXISTS FOR (i:Interface) REQUIRE i.id IS UNIQUE",
+        ]
+        
+        indexes = [
+            "CREATE INDEX file_name IF NOT EXISTS FOR (f:File) ON (f.name)",
+            "CREATE INDEX file_path IF NOT EXISTS FOR (f:File) ON (f.path)",
+            "CREATE INDEX class_name IF NOT EXISTS FOR (c:Class) ON (c.name)",
+            "CREATE INDEX function_name IF NOT EXISTS FOR (f:Function) ON (f.name)",
+            "CREATE INDEX function_signature IF NOT EXISTS FOR (f:Function) ON (f.signature)",
+            "CREATE FULLTEXT INDEX function_docstring IF NOT EXISTS FOR (f:Function) ON EACH [f.docstring]",
+            "CREATE FULLTEXT INDEX class_docstring IF NOT EXISTS FOR (c:Class) ON EACH [c.docstring]",
+        ]
+        
+        with self.driver.session() as session:
+            for constraint in constraints:
+                try:
+                    session.run(constraint)
+                except Exception as e:
+                    if "already exists" not in str(e).lower():
+                        print(f"Warning creating constraint: {e}")
+            
+            for index in indexes:
+                try:
+                    session.run(index)
+                except Exception as e:
+                    if "already exists" not in str(e).lower():
+                        print(f"Warning creating index: {e}")
+        
+        print("Constraints and indexes created")
+    
+    def clear_repository(self, repo_id: str):
+        """Clear all data for a specific repository"""
+        with self.driver.session() as session:
+            # Delete all nodes connected to this repository
+            session.run("""
+                MATCH (r:Repository {id: $repo_id})
+                OPTIONAL MATCH (r)-[*]->(n)
+                DETACH DELETE n, r
+            """, repo_id=repo_id)
+        print(f"Cleared existing data for repository: {repo_id}")
+    
+    def ingest(self, codebase: ParsedCodebase, clear_existing: bool = True):
+        """Ingest a parsed codebase into Neo4j"""
+        if clear_existing:
+            self.clear_repository(codebase.repository.id)
+        
+        with self.driver.session() as session:
+            # Ingest repository
+            self._ingest_repository(session, codebase)
+            
+            # Ingest files
+            self._ingest_files(session, codebase)
+            
+            # Ingest modules
+            self._ingest_modules(session, codebase)
+            
+            # Ingest classes
+            self._ingest_classes(session, codebase)
+            
+            # Ingest functions
+            self._ingest_functions(session, codebase)
+            
+            # Ingest variables
+            self._ingest_variables(session, codebase)
+            
+            # Ingest imports
+            self._ingest_imports(session, codebase)
+            
+            # Create relationships
+            self._ingest_relationships(session, codebase)
+        
+        stats = codebase.get_stats()
+        print(f"Ingestion complete: {stats}")
+    
+    def _ingest_repository(self, session, codebase: ParsedCodebase):
+        """Ingest repository node"""
+        repo = codebase.repository
+        session.run("""
+            MERGE (r:Repository {id: $id})
+            SET r.name = $name,
+                r.path = $path,
+                r.language = $language,
+                r.description = $description,
+                r.lastIndexed = datetime()
+        """, **repo.to_dict())
+    
+    def _ingest_files(self, session, codebase: ParsedCodebase):
+        """Ingest file nodes in batch"""
+        if not codebase.files:
+            return
+        
+        records = [f.to_dict() for f in codebase.files]
+        session.run("""
+            UNWIND $records AS record
+            MERGE (f:File {id: record.id})
+            SET f.name = record.name,
+                f.path = record.path,
+                f.extension = record.extension,
+                f.language = record.language,
+                f.linesOfCode = record.linesOfCode,
+                f.hash = record.hash
+        """, records=records)
+    
+    def _ingest_modules(self, session, codebase: ParsedCodebase):
+        """Ingest module nodes in batch"""
+        if not codebase.modules:
+            return
+        
+        records = [m.to_dict() for m in codebase.modules]
+        session.run("""
+            UNWIND $records AS record
+            MERGE (m:Module {id: record.id})
+            SET m.name = record.name,
+                m.path = record.path,
+                m.type = record.type
+        """, records=records)
+    
+    def _ingest_classes(self, session, codebase: ParsedCodebase):
+        """Ingest class nodes in batch"""
+        if not codebase.classes:
+            return
+        
+        records = [c.to_dict() for c in codebase.classes]
+        session.run("""
+            UNWIND $records AS record
+            MERGE (c:Class {id: record.id})
+            SET c.name = record.name,
+                c.docstring = record.docstring,
+                c.startLine = record.startLine,
+                c.endLine = record.endLine,
+                c.isAbstract = record.isAbstract,
+                c.decorators = record.decorators
+        """, records=records)
+    
+    def _ingest_functions(self, session, codebase: ParsedCodebase):
+        """Ingest function nodes in batch"""
+        if not codebase.functions:
+            return
+        
+        records = [f.to_dict() for f in codebase.functions]
+        session.run("""
+            UNWIND $records AS record
+            MERGE (f:Function {id: record.id})
+            SET f.name = record.name,
+                f.signature = record.signature,
+                f.docstring = record.docstring,
+                f.startLine = record.startLine,
+                f.endLine = record.endLine,
+                f.isAsync = record.isAsync,
+                f.isStatic = record.isStatic,
+                f.returnType = record.returnType,
+                f.complexity = record.complexity,
+                f.parameters = record.parameters
+        """, records=records)
+    
+    def _ingest_variables(self, session, codebase: ParsedCodebase):
+        """Ingest variable nodes in batch"""
+        if not codebase.variables:
+            return
+        
+        records = [v.to_dict() for v in codebase.variables]
+        session.run("""
+            UNWIND $records AS record
+            MERGE (v:Variable {id: record.id})
+            SET v.name = record.name,
+                v.type = record.type,
+                v.scope = record.scope,
+                v.isConstant = record.isConstant
+        """, records=records)
+    
+    def _ingest_imports(self, session, codebase: ParsedCodebase):
+        """Ingest import nodes in batch"""
+        if not codebase.imports:
+            return
+        
+        records = [i.to_dict() for i in codebase.imports]
+        session.run("""
+            UNWIND $records AS record
+            MERGE (i:Import {id: record.id})
+            SET i.name = record.name,
+                i.source = record.source,
+                i.isExternal = record.isExternal
+        """, records=records)
+    
+    def _ingest_relationships(self, session, codebase: ParsedCodebase):
+        """Ingest all relationships"""
+        # Group relationships by type for efficient batch processing
+        rel_groups: Dict[str, List[Dict]] = {}
+        for rel in codebase.relationships:
+            if rel.rel_type not in rel_groups:
+                rel_groups[rel.rel_type] = []
+            rel_groups[rel.rel_type].append(rel.to_dict())
+        
+        # Relationship type to node label mapping
+        rel_config = {
+            'CONTAINS_FILE': ('Repository', 'File'),
+            'CONTAINS_MODULE': ('Repository', 'Module'),
+            'BELONGS_TO_MODULE': ('File', 'Module'),
+            'DEFINES_CLASS': ('File', 'Class'),
+            'DEFINES_FUNCTION': ('File', 'Function'),
+            'HAS_METHOD': ('Class', 'Function'),
+            'HAS_VARIABLE': ('Class', 'Variable'),
+            'EXTENDS': ('Class', 'Class'),
+            'IMPLEMENTS': ('Class', 'Interface'),
+            'CALLS': ('Function', 'Function'),
+            'USES_CLASS': ('Function', 'Class'),
+            'USES_VARIABLE': ('Function', 'Variable'),
+            'IMPORTS': ('File', 'Import'),
+            'IMPORTS_FROM': ('File', 'File'),
+            'DEPENDS_ON': ('File', 'File'),
+            'INSTANTIATES': ('Function', 'Class'),
+            'RETURNS_TYPE': ('Function', 'Class'),
+        }
+        
+        for rel_type, records in rel_groups.items():
+            if rel_type not in rel_config:
+                print(f"Warning: Unknown relationship type {rel_type}")
+                continue
+            
+            source_label, target_label = rel_config[rel_type]
+            
+            # Build property setting clause
+            prop_keys = set()
+            for record in records:
+                prop_keys.update(k for k in record.keys() if k not in ['type', 'sourceId', 'targetId'])
+            
+            prop_clause = ', '.join([f'rel.{k} = record.{k}' for k in prop_keys])
+            if prop_clause:
+                prop_clause = 'SET ' + prop_clause
+            
+            query = f"""
+                UNWIND $records AS record
+                MATCH (source:{source_label} {{id: record.sourceId}})
+                MATCH (target:{target_label} {{id: record.targetId}})
+                MERGE (source)-[rel:{rel_type}]->(target)
+                {prop_clause}
+            """
+            
+            try:
+                session.run(query, records=records)
+            except Exception as e:
+                print(f"Error creating {rel_type} relationships: {e}")
+
+
+class CodeKAGQuerier:
+    """Query interface for the Code Knowledge Graph"""
+    
+    def __init__(self, uri: str = None, username: str = None, password: str = None):
+        self.uri = uri or os.getenv('NEO4J_URI', 'bolt://localhost:7687')
+        self.username = username or os.getenv('NEO4J_USERNAME', 'neo4j')
+        self.password = password or os.getenv('NEO4J_PASSWORD', 'password')
+        self.driver = None
+    
+    def connect(self):
+        """Establish connection to Neo4j"""
+        self.driver = GraphDatabase.driver(
+            self.uri, 
+            auth=(self.username, self.password)
+        )
+    
+    def close(self):
+        """Close the connection"""
+        if self.driver:
+            self.driver.close()
+    
+    def search_functions(self, query: str, limit: int = 10) -> List[Dict]:
+        """Search functions by name or docstring"""
+        with self.driver.session() as session:
+            result = session.run("""
+                CALL db.index.fulltext.queryNodes('function_docstring', $query)
+                YIELD node, score
+                RETURN node.id AS id, node.name AS name, node.signature AS signature,
+                       node.docstring AS docstring, score
+                ORDER BY score DESC
+                LIMIT $limit
+            """, query=query, limit=limit)
+            return [dict(record) for record in result]
+    
+    def search_classes(self, query: str, limit: int = 10) -> List[Dict]:
+        """Search classes by name or docstring"""
+        with self.driver.session() as session:
+            result = session.run("""
+                CALL db.index.fulltext.queryNodes('class_docstring', $query)
+                YIELD node, score
+                RETURN node.id AS id, node.name AS name, 
+                       node.docstring AS docstring, score
+                ORDER BY score DESC
+                LIMIT $limit
+            """, query=query, limit=limit)
+            return [dict(record) for record in result]
+    
+    def find_function_by_name(self, name: str) -> List[Dict]:
+        """Find functions by exact name"""
+        with self.driver.session() as session:
+            result = session.run("""
+                MATCH (f:Function {name: $name})
+                OPTIONAL MATCH (file:File)-[:DEFINES_FUNCTION]->(f)
+                OPTIONAL MATCH (class:Class)-[:HAS_METHOD]->(f)
+                RETURN f.id AS id, f.name AS name, f.signature AS signature,
+                       f.docstring AS docstring, f.startLine AS startLine,
+                       file.path AS filePath, class.name AS className
+            """, name=name)
+            return [dict(record) for record in result]
+    
+    def find_class_by_name(self, name: str) -> List[Dict]:
+        """Find classes by exact name"""
+        with self.driver.session() as session:
+            result = session.run("""
+                MATCH (c:Class {name: $name})
+                OPTIONAL MATCH (file:File)-[:DEFINES_CLASS]->(c)
+                OPTIONAL MATCH (c)-[:EXTENDS]->(parent:Class)
+                OPTIONAL MATCH (c)-[:HAS_METHOD]->(method:Function)
+                RETURN c.id AS id, c.name AS name, c.docstring AS docstring,
+                       c.startLine AS startLine, file.path AS filePath,
+                       collect(DISTINCT parent.name) AS parentClasses,
+                       collect(DISTINCT method.name) AS methods
+            """, name=name)
+            return [dict(record) for record in result]
+    
+    def get_function_callgraph(self, function_id: str, depth: int = 2) -> Dict:
+        """Get the call graph for a function"""
+        with self.driver.session() as session:
+            result = session.run("""
+                MATCH path = (f:Function {id: $function_id})-[:CALLS*1..$depth]->(called:Function)
+                WITH f, collect(DISTINCT {
+                    id: called.id, 
+                    name: called.name,
+                    depth: length(path)
+                }) AS calls
+                RETURN f.id AS sourceId, f.name AS sourceName, calls
+            """, function_id=function_id, depth=depth)
+            record = result.single()
+            return dict(record) if record else {}
+    
+    def get_class_hierarchy(self, class_name: str) -> Dict:
+        """Get class inheritance hierarchy"""
+        with self.driver.session() as session:
+            result = session.run("""
+                MATCH (c:Class {name: $class_name})
+                OPTIONAL MATCH path = (c)-[:EXTENDS*]->(ancestor:Class)
+                OPTIONAL MATCH childPath = (child:Class)-[:EXTENDS*]->(c)
+                RETURN c.id AS id, c.name AS name,
+                       collect(DISTINCT ancestor.name) AS ancestors,
+                       collect(DISTINCT child.name) AS descendants
+            """, class_name=class_name)
+            record = result.single()
+            return dict(record) if record else {}
+    
+    def get_file_dependencies(self, file_path: str) -> Dict:
+        """Get files that a file depends on and files that depend on it"""
+        with self.driver.session() as session:
+            result = session.run("""
+                MATCH (f:File {path: $file_path})
+                OPTIONAL MATCH (f)-[:DEPENDS_ON]->(dep:File)
+                OPTIONAL MATCH (dependent:File)-[:DEPENDS_ON]->(f)
+                RETURN f.path AS filePath,
+                       collect(DISTINCT dep.path) AS dependsOn,
+                       collect(DISTINCT dependent.path) AS dependedBy
+            """, file_path=file_path)
+            record = result.single()
+            return dict(record) if record else {}
+    
+    def find_similar_functions(self, function_id: str, limit: int = 5) -> List[Dict]:
+        """Find functions with similar structure (same classes used, similar calls)"""
+        with self.driver.session() as session:
+            result = session.run("""
+                MATCH (f:Function {id: $function_id})-[:CALLS]->(called:Function)
+                WITH f, collect(called) AS fCalls
+                MATCH (other:Function)-[:CALLS]->(otherCalled:Function)
+                WHERE other <> f AND otherCalled IN fCalls
+                WITH other, count(DISTINCT otherCalled) AS commonCalls, size(fCalls) AS totalCalls
+                WHERE commonCalls > 0
+                RETURN other.id AS id, other.name AS name, other.signature AS signature,
+                       commonCalls, toFloat(commonCalls) / totalCalls AS similarity
+                ORDER BY similarity DESC
+                LIMIT $limit
+            """, function_id=function_id, limit=limit)
+            return [dict(record) for record in result]
+    
+    def get_code_context(self, entity_id: str) -> Dict:
+        """Get comprehensive context for a code entity (function or class)"""
+        with self.driver.session() as session:
+            result = session.run("""
+                // Try to find as function first
+                OPTIONAL MATCH (f:Function {id: $entity_id})
+                OPTIONAL MATCH (file:File)-[:DEFINES_FUNCTION]->(f)
+                OPTIONAL MATCH (class:Class)-[:HAS_METHOD]->(f)
+                OPTIONAL MATCH (f)-[:CALLS]->(called:Function)
+                OPTIONAL MATCH (caller:Function)-[:CALLS]->(f)
+                OPTIONAL MATCH (f)-[:USES_CLASS]->(usedClass:Class)
+                
+                WITH f, file, class, 
+                     collect(DISTINCT {id: called.id, name: called.name}) AS calls,
+                     collect(DISTINCT {id: caller.id, name: caller.name}) AS calledBy,
+                     collect(DISTINCT usedClass.name) AS usesClasses
+                WHERE f IS NOT NULL
+                
+                RETURN 'function' AS type,
+                       f.id AS id, f.name AS name, f.signature AS signature,
+                       f.docstring AS docstring, f.startLine AS startLine, f.endLine AS endLine,
+                       file.path AS filePath, class.name AS className,
+                       calls, calledBy, usesClasses
+                       
+                UNION
+                
+                // Try to find as class
+                MATCH (c:Class {id: $entity_id})
+                OPTIONAL MATCH (file:File)-[:DEFINES_CLASS]->(c)
+                OPTIONAL MATCH (c)-[:HAS_METHOD]->(method:Function)
+                OPTIONAL MATCH (c)-[:EXTENDS]->(parent:Class)
+                OPTIONAL MATCH (child:Class)-[:EXTENDS]->(c)
+                OPTIONAL MATCH (c)-[:HAS_VARIABLE]->(var:Variable)
+                
+                RETURN 'class' AS type,
+                       c.id AS id, c.name AS name, null AS signature,
+                       c.docstring AS docstring, c.startLine AS startLine, c.endLine AS endLine,
+                       file.path AS filePath, null AS className,
+                       collect(DISTINCT {id: method.id, name: method.name}) AS calls,
+                       collect(DISTINCT {name: parent.name}) AS calledBy,
+                       collect(DISTINCT var.name) AS usesClasses
+            """, entity_id=entity_id)
+            
+            records = list(result)
+            if records:
+                return dict(records[0])
+            return {}
+    
+    def semantic_code_search(self, query: str, limit: int = 20) -> List[Dict]:
+        """
+        Semantic search across all code entities.
+        Returns functions, classes, and files matching the query.
+        """
+        results = []
+        
+        with self.driver.session() as session:
+            # Search functions
+            func_result = session.run("""
+                MATCH (f:Function)
+                WHERE f.name CONTAINS $query 
+                   OR f.docstring CONTAINS $query
+                   OR f.signature CONTAINS $query
+                OPTIONAL MATCH (file:File)-[:DEFINES_FUNCTION|HAS_METHOD*]->(f)
+                RETURN 'function' AS type, f.id AS id, f.name AS name,
+                       f.docstring AS description, file.path AS location,
+                       f.startLine AS startLine
+                LIMIT $limit
+            """, query=query, limit=limit)
+            results.extend([dict(r) for r in func_result])
+            
+            # Search classes
+            class_result = session.run("""
+                MATCH (c:Class)
+                WHERE c.name CONTAINS $query 
+                   OR c.docstring CONTAINS $query
+                OPTIONAL MATCH (file:File)-[:DEFINES_CLASS]->(c)
+                RETURN 'class' AS type, c.id AS id, c.name AS name,
+                       c.docstring AS description, file.path AS location,
+                       c.startLine AS startLine
+                LIMIT $limit
+            """, query=query, limit=limit)
+            results.extend([dict(r) for r in class_result])
+            
+            # Search files
+            file_result = session.run("""
+                MATCH (f:File)
+                WHERE f.name CONTAINS $query 
+                   OR f.path CONTAINS $query
+                RETURN 'file' AS type, f.id AS id, f.name AS name,
+                       f.path AS description, f.path AS location,
+                       0 AS startLine
+                LIMIT $limit
+            """, query=query, limit=limit)
+            results.extend([dict(r) for r in file_result])
+        
+        return results[:limit]
+
+
+def ingest_repository(repo_path: str, neo4j_uri: str = None, 
+                      neo4j_user: str = None, neo4j_password: str = None) -> Dict:
+    """
+    Convenience function to parse and ingest a repository.
+    Returns statistics about the ingestion.
+    """
+    from .parser import parse_repository
+    
+    # Parse the repository
+    print(f"Parsing repository: {repo_path}")
+    codebase = parse_repository(repo_path)
+    
+    # Ingest into Neo4j
+    ingester = Neo4jIngester(neo4j_uri, neo4j_user, neo4j_password)
+    ingester.connect()
+    
+    try:
+        ingester.create_constraints()
+        ingester.ingest(codebase)
+        return codebase.get_stats()
+    finally:
+        ingester.close()

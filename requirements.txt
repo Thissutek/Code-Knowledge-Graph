@@ -1,0 +1,18 @@
+# Core dependencies
+neo4j>=5.0.0
+
+# MCP SDK for AI integration
+mcp>=0.1.0
+
+# For TypeScript/JavaScript parsing (optional)
+# tree-sitter>=0.20.0
+# tree-sitter-python>=0.20.0
+# tree-sitter-javascript>=0.20.0
+# tree-sitter-typescript>=0.20.0
+
+# Development dependencies
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+black>=23.0.0
+mypy>=1.0.0
+
