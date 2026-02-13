@@ -12,6 +12,10 @@ NEO4J_PASSWORD="{{NEO4J_PASSWORD}}"
 LOCKFILE="/tmp/code-kag-reindex-${REPO_ID}.lock"
 LOGFILE="/tmp/code-kag-reindex-${REPO_ID}.log"
 
+code_kag_log() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') $1" >> "$LOGFILE"
+}
+
 # Find the right Python: prefer the project venv, then python3, then python
 if [ -x "$CODE_KAG_PATH/.venv/bin/python" ]; then
     PYTHON="$CODE_KAG_PATH/.venv/bin/python"
@@ -21,6 +25,7 @@ elif command -v python &>/dev/null; then
     PYTHON="python"
 else
     echo "[code-kag] ERROR: No python or python3 found in PATH" >&2
+    code_kag_log "ERROR: No python or python3 found in PATH"
     return 1 2>/dev/null || exit 1
 fi
 
@@ -28,6 +33,8 @@ code_kag_reindex() {
     local mode="$1"
     shift
     local files=("$@")
+
+    code_kag_log "TRIGGER: mode=$mode, files=${#files[@]}, hook=$CODE_KAG_HOOK"
 
     # Check if Neo4j is reachable before attempting re-index
     local neo4j_host neo4j_port
@@ -38,7 +45,7 @@ code_kag_reindex() {
     if ! nc -z "$neo4j_host" "$neo4j_port" 2>/dev/null; then
         echo "[code-kag] WARNING: Neo4j is not reachable at $NEO4J_URI" >&2
         echo "[code-kag] Skipping re-index. Start Neo4j and re-run: $PYTHON \"$CODE_KAG_PATH/cli.py\" index \"$(pwd)\" --id \"$REPO_ID\"" >&2
-        echo "$(date '+%Y-%m-%d %H:%M:%S') SKIPPED: Neo4j not reachable at $NEO4J_URI" >> "$LOGFILE"
+        code_kag_log "SKIPPED: Neo4j not reachable at $NEO4J_URI"
         return 1
     fi
 
@@ -46,9 +53,11 @@ code_kag_reindex() {
     if [ -f "$LOCKFILE" ]; then
         pid=$(cat "$LOCKFILE" 2>/dev/null)
         if kill -0 "$pid" 2>/dev/null; then
-            echo "[code-kag] Re-index already in progress (pid $pid), skipping."
+            echo "[code-kag] Re-index already in progress (pid $pid), skipping." >&2
+            code_kag_log "SKIPPED: Re-index already in progress (pid $pid)"
             return 0
         fi
+        code_kag_log "INFO: Cleaned up stale lockfile (pid $pid no longer running)"
         rm -f "$LOCKFILE"
     fi
 
@@ -60,7 +69,7 @@ code_kag_reindex() {
         local exit_code=0
 
         if [ "$mode" = "incremental" ] && [ ${#files[@]} -gt 0 ]; then
-            echo "[code-kag] Incremental re-index: ${#files[@]} file(s)"
+            code_kag_log "START: Incremental re-index of ${#files[@]} file(s): ${files[*]}"
             "$PYTHON" "$CODE_KAG_PATH/cli.py" \
                 --neo4j-uri "$NEO4J_URI" \
                 --neo4j-user "$NEO4J_USER" \
@@ -72,7 +81,7 @@ code_kag_reindex() {
                 >> "$LOGFILE" 2>&1
             exit_code=$?
         else
-            echo "[code-kag] Full re-index"
+            code_kag_log "START: Full re-index"
             "$PYTHON" "$CODE_KAG_PATH/cli.py" \
                 --neo4j-uri "$NEO4J_URI" \
                 --neo4j-user "$NEO4J_USER" \
@@ -84,10 +93,10 @@ code_kag_reindex() {
         fi
 
         if [ $exit_code -ne 0 ]; then
-            echo "$(date '+%Y-%m-%d %H:%M:%S') FAILED: Re-index exited with code $exit_code (mode=$mode)" >> "$LOGFILE"
+            code_kag_log "FAILED: Re-index exited with code $exit_code (mode=$mode)"
             echo "[code-kag] ERROR: Re-index failed. Check log: $LOGFILE" >&2
         else
-            echo "$(date '+%Y-%m-%d %H:%M:%S') SUCCESS: Re-index completed (mode=$mode)" >> "$LOGFILE"
+            code_kag_log "SUCCESS: Re-index completed (mode=$mode)"
         fi
     ) &
     disown
