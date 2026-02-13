@@ -24,7 +24,7 @@ RUN mkdir -p /repos
 # Environment variables (can be overridden)
 ENV NEO4J_URI=bolt://neo4j:7687
 ENV NEO4J_USERNAME=neo4j
-ENV NEO4J_PASSWORD=code-kag-password
+# NEO4J_PASSWORD must be set at runtime (via docker-compose .env or -e flag)
 ENV PYTHONUNBUFFERED=1
 
 # Default command - run MCP server

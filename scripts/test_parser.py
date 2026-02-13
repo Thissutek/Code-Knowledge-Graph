@@ -254,7 +254,7 @@ def main():
         print("\n✅ Parser test completed successfully!")
         print("\n📝 Next steps:")
         print("   1. Start Neo4j: docker-compose up -d")
-        print("   2. Set credentials: export NEO4J_PASSWORD=code-kag-password")
+        print("   2. Set credentials: export NEO4J_PASSWORD=your-password")
         print("   3. Index your real repo: python cli.py index /path/to/your/code")
         print("   4. Start MCP server: python cli.py serve")
         

@@ -69,6 +69,10 @@ Everything runs in containers, no local installation needed!
 git clone https://github.com/yourusername/code-kag.git
 cd code-kag
 
+# Set up credentials
+cp .env.example .env
+# Edit .env and set your NEO4J_PASSWORD
+
 # Make the script executable
 chmod +x start.sh
 
@@ -90,7 +94,7 @@ chmod +x start.sh
 
 Open http://localhost:7474 in your browser:
 - **Username:** neo4j
-- **Password:** code-kag-password
+- **Password:** (the value you set in `.env`)
 
 Try this query:
 ```cypher
@@ -168,8 +172,8 @@ python cli.py hooks install /path/to/repo --id my-project --mode incremental
 # Install hooks with full re-index mode
 python cli.py hooks install /path/to/repo --id my-project --mode full
 
-# With custom Neo4j credentials
-python cli.py --neo4j-password code-kag-password hooks install /path/to/repo --id my-project
+# With custom Neo4j credentials (or set NEO4J_PASSWORD env var)
+python cli.py --neo4j-password YOUR_PASSWORD hooks install /path/to/repo --id my-project
 ```
 
 ### Uninstall Hooks
@@ -349,8 +353,8 @@ python cli.py index /path/to/repo --id project-name --incremental --changed-file
 # Install git hooks for automatic re-indexing
 python cli.py hooks install /path/to/repo --id project-name --mode incremental
 
-# Install hooks with custom Neo4j credentials
-python cli.py --neo4j-password code-kag-password hooks install /path/to/repo --id project-name
+# Install hooks with custom Neo4j credentials (or set NEO4J_PASSWORD env var)
+python cli.py --neo4j-password YOUR_PASSWORD hooks install /path/to/repo --id project-name
 
 # Uninstall git hooks
 python cli.py hooks uninstall /path/to/repo
@@ -384,7 +388,7 @@ python cli.py stats
 |----------|---------|-------------|
 | `NEO4J_URI` | `bolt://localhost:7687` | Neo4j connection URI |
 | `NEO4J_USERNAME` | `neo4j` | Neo4j username |
-| `NEO4J_PASSWORD` | `password` | Neo4j password |
+| `NEO4J_PASSWORD` | *(required)* | Neo4j password — set in `.env` or pass via `--neo4j-password` |
 
 ## Development
 

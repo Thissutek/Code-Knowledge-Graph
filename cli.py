@@ -188,11 +188,11 @@ Examples:
 
     # Global arguments
     parser.add_argument('--neo4j-uri', default=os.getenv('NEO4J_URI', 'bolt://localhost:7687'),
-                        help='Neo4j connection URI')
+                        help='Neo4j connection URI (env: NEO4J_URI)')
     parser.add_argument('--neo4j-user', default=os.getenv('NEO4J_USERNAME', 'neo4j'),
-                        help='Neo4j username')
-    parser.add_argument('--neo4j-password', default=os.getenv('NEO4J_PASSWORD', 'password'),
-                        help='Neo4j password')
+                        help='Neo4j username (env: NEO4J_USERNAME)')
+    parser.add_argument('--neo4j-password', default=os.getenv('NEO4J_PASSWORD'),
+                        help='Neo4j password (env: NEO4J_PASSWORD)')
 
     subparsers = parser.add_subparsers(dest='command', help='Commands')
 

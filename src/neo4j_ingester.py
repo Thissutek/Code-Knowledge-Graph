@@ -14,13 +14,16 @@ class Neo4jIngester:
     def __init__(self, uri: str = None, username: str = None, password: str = None):
         self.uri = uri or os.getenv('NEO4J_URI', 'bolt://localhost:7687')
         self.username = username or os.getenv('NEO4J_USERNAME', 'neo4j')
-        self.password = password or os.getenv('NEO4J_PASSWORD', 'password')
+        self.password = password or os.getenv('NEO4J_PASSWORD')
         self.driver = None
-    
+
     def connect(self):
         """Establish connection to Neo4j"""
+        if not self.password:
+            raise ValueError(
+                "Neo4j password is required. Pass password= or set NEO4J_PASSWORD env var.")
         self.driver = GraphDatabase.driver(
-            self.uri, 
+            self.uri,
             auth=(self.username, self.password)
         )
         # Test connection
@@ -339,13 +342,16 @@ class CodeKAGQuerier:
     def __init__(self, uri: str = None, username: str = None, password: str = None):
         self.uri = uri or os.getenv('NEO4J_URI', 'bolt://localhost:7687')
         self.username = username or os.getenv('NEO4J_USERNAME', 'neo4j')
-        self.password = password or os.getenv('NEO4J_PASSWORD', 'password')
+        self.password = password or os.getenv('NEO4J_PASSWORD')
         self.driver = None
-    
+
     def connect(self):
         """Establish connection to Neo4j"""
+        if not self.password:
+            raise ValueError(
+                "Neo4j password is required. Pass password= or set NEO4J_PASSWORD env var.")
         self.driver = GraphDatabase.driver(
-            self.uri, 
+            self.uri,
             auth=(self.username, self.password)
         )
     

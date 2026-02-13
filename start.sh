@@ -67,7 +67,7 @@ EXAMPLES:
     ./start.sh stop
 
 ENVIRONMENT VARIABLES:
-    NEO4J_PASSWORD      Password for Neo4j (default: code-kag-password)
+    NEO4J_PASSWORD      Password for Neo4j (set in .env file)
     NEO4J_PORT          Neo4j browser port (default: 7474)
     BOLT_PORT           Neo4j bolt port (default: 7687)
 
@@ -103,7 +103,7 @@ cmd_start() {
     echo ""
     echo "  Browser UI: http://localhost:${NEO4J_PORT:-7474}"
     echo "  Username:   neo4j"
-    echo "  Password:   ${NEO4J_PASSWORD:-code-kag-password}"
+    echo "  Password:   (from .env file)"
     echo ""
     print_step "Next: Index a repository with: ./start.sh index /path/to/code"
 }

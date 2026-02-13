@@ -26,19 +26,26 @@ class HookManager:
 
     def install(self, repo_path: str, repo_id: Optional[str] = None,
                 mode: str = 'incremental',
-                neo4j_uri: str = 'bolt://localhost:7687',
-                neo4j_user: str = 'neo4j',
-                neo4j_password: str = 'password'):
+                neo4j_uri: Optional[str] = None,
+                neo4j_user: Optional[str] = None,
+                neo4j_password: Optional[str] = None):
         """Install code-kag hooks into a git repository.
 
         Args:
             repo_path: Path to the git repository.
             repo_id: Repository identifier (defaults to directory name).
             mode: 'incremental' or 'full' re-indexing mode.
-            neo4j_uri: Neo4j connection URI.
-            neo4j_user: Neo4j username.
-            neo4j_password: Neo4j password.
+            neo4j_uri: Neo4j connection URI (default: env NEO4J_URI or bolt://localhost:7687).
+            neo4j_user: Neo4j username (default: env NEO4J_USERNAME or 'neo4j').
+            neo4j_password: Neo4j password (default: env NEO4J_PASSWORD, required).
         """
+        neo4j_uri = neo4j_uri or os.getenv('NEO4J_URI', 'bolt://localhost:7687')
+        neo4j_user = neo4j_user or os.getenv('NEO4J_USERNAME', 'neo4j')
+        neo4j_password = neo4j_password or os.getenv('NEO4J_PASSWORD')
+        if not neo4j_password:
+            raise ValueError(
+                "Neo4j password is required. Pass --neo4j-password or set NEO4J_PASSWORD env var.")
+
         repo = Path(repo_path).resolve()
         hooks_dir = repo / '.git' / 'hooks'
 
