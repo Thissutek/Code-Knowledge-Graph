@@ -36,7 +36,7 @@ def cmd_search(args):
     q.connect()
     
     try:
-        results = q.semantic_code_search(args.query, args.limit)
+        results = q.semantic_code_search(args.query, args.limit, repo_id=args.repo_id)
         print(json.dumps(results, indent=2))
     finally:
         q.close()
@@ -50,7 +50,7 @@ def cmd_function(args):
     q.connect()
     
     try:
-        results = q.find_function_by_name(args.name)
+        results = q.find_function_by_name(args.name, repo_id=args.repo_id)
         if results:
             print(json.dumps(results, indent=2))
         else:
@@ -67,7 +67,7 @@ def cmd_callgraph(args):
     q.connect()
     
     try:
-        result = q.get_function_callgraph(args.function_id, args.depth)
+        result = q.get_function_callgraph(args.function_id, args.depth, repo_id=args.repo_id)
         print(json.dumps(result, indent=2))
     finally:
         q.close()
@@ -102,13 +102,16 @@ def cmd_stats(args):
             result = session.run("""
                 MATCH (r:Repository)
                 OPTIONAL MATCH (r)-[:CONTAINS_FILE]->(f:File)
+                WITH r, count(DISTINCT f) AS files
                 OPTIONAL MATCH (r)-[:CONTAINS_MODULE]->(m:Module)
-                WITH r, count(DISTINCT f) AS files, count(DISTINCT m) AS modules
-                MATCH (c:Class)
-                WITH r, files, modules, count(c) AS classes
-                MATCH (func:Function)
+                WITH r, files, count(DISTINCT m) AS modules
+                OPTIONAL MATCH (r)-[:CONTAINS_FILE]->(:File)-[:DEFINES_CLASS]->(c:Class)
+                WITH r, files, modules, count(DISTINCT c) AS classes
+                OPTIONAL MATCH (r)-[:CONTAINS_FILE]->(:File)-[:DEFINES_FUNCTION]->(func:Function)
+                WITH r, files, modules, classes, count(DISTINCT func) AS topLevelFuncs
+                OPTIONAL MATCH (r)-[:CONTAINS_FILE]->(:File)-[:DEFINES_CLASS]->(:Class)-[:HAS_METHOD]->(m2:Function)
                 RETURN r.id AS repo, r.name AS name, r.path AS path,
-                       files, modules, classes, count(func) AS functions
+                       files, modules, classes, topLevelFuncs + count(DISTINCT m2) AS functions
             """)
             
             for record in result:
@@ -165,17 +168,20 @@ Examples:
     search_parser = subparsers.add_parser('search', help='Search code')
     search_parser.add_argument('query', help='Search query')
     search_parser.add_argument('--limit', type=int, default=10, help='Max results')
+    search_parser.add_argument('--repo-id', default=None, help='Scope results to a specific repository')
     search_parser.set_defaults(func=cmd_search)
     
     # Function command
     func_parser = subparsers.add_parser('function', help='Get function details')
     func_parser.add_argument('name', help='Function name')
+    func_parser.add_argument('--repo-id', default=None, help='Scope results to a specific repository')
     func_parser.set_defaults(func=cmd_function)
     
     # Call graph command
     cg_parser = subparsers.add_parser('callgraph', help='Get call graph')
     cg_parser.add_argument('function_id', help='Function ID')
     cg_parser.add_argument('--depth', type=int, default=2, help='Traversal depth')
+    cg_parser.add_argument('--repo-id', default=None, help='Scope results to a specific repository')
     cg_parser.set_defaults(func=cmd_callgraph)
     
     # Serve command

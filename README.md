@@ -150,10 +150,13 @@ See [docs/INDEXING_FLOW.md](docs/INDEXING_FLOW.md) for detailed sequence diagram
 
 ## 🔧 Available Tools
 
+All query tools accept an optional `repo_id` parameter to scope results to a single repository. Omit it to search across all indexed repos.
+
 ### search_code
 Search for functions, classes, or files by name or content.
 ```
 "Find all functions related to database connection"
+"Search for 'authentication' in my-project only" (pass repo_id: "my-project")
 ```
 
 ### get_function_details
@@ -228,21 +231,28 @@ code-kag/
 # Index a repository
 python cli.py index /path/to/repo --id project-name
 
-# Search code
+# Search code (all repos)
 python cli.py search "authentication"
+
+# Search code (scoped to one repo)
+python cli.py search "authentication" --repo-id my-project
 
 # Get function info
 python cli.py function my_function_name
+python cli.py function my_function_name --repo-id my-project
 
 # Get call graph
 python cli.py callgraph "file.py:MyClass:method" --depth 3
+python cli.py callgraph "file.py:MyClass:method" --depth 3 --repo-id my-project
 
 # Start MCP server manually
 python cli.py serve
 
-# Show statistics
+# Show statistics (lists all repos and their IDs)
 python cli.py stats
 ```
+
+The `--repo-id` flag is available on `search`, `function`, and `callgraph` commands. When omitted, queries run across all indexed repositories.
 
 ## 🛠️ Extending for Other Languages
 

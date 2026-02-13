@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # =============================================================================
   # Neo4j Graph Database
@@ -48,6 +46,12 @@ services:
       - ${CODE_PATH:-./repos}:/repos:ro
       # Mount for stdio communication with MCP
       - /tmp/code-kag:/tmp/code-kag
+    healthcheck:
+      test: ["CMD", "python", "healthcheck.py"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
     networks:
       - code-kag-network
     restart: unless-stopped

@@ -23,8 +23,7 @@ class CodeEntity:
     name: str
     
     def to_dict(self) -> Dict[str, Any]:
-        return {k: v for k, v in self.__dict__.items() if v is not None}
-
+        return {k: v for k, v in self.__dict__.items() if v is not None and not k.startswith('_')}
 
 @dataclass
 class Repository(CodeEntity):

@@ -308,219 +308,386 @@ class CodeKAGQuerier:
         if self.driver:
             self.driver.close()
     
-    def search_functions(self, query: str, limit: int = 10) -> List[Dict]:
+    def search_functions(self, query: str, limit: int = 10, repo_id: str = None) -> List[Dict]:
         """Search functions by name or docstring"""
         with self.driver.session() as session:
-            result = session.run("""
-                CALL db.index.fulltext.queryNodes('function_docstring', $query)
-                YIELD node, score
-                RETURN node.id AS id, node.name AS name, node.signature AS signature,
-                       node.docstring AS docstring, score
-                ORDER BY score DESC
-                LIMIT $limit
-            """, query=query, limit=limit)
+            if repo_id:
+                result = session.run("""
+                    CALL db.index.fulltext.queryNodes('function_docstring', $searchTerm)
+                    YIELD node, score
+                    MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(:File)-[:DEFINES_FUNCTION|HAS_METHOD*]->(node)
+                    RETURN node.id AS id, node.name AS name, node.signature AS signature,
+                           node.docstring AS docstring, score
+                    ORDER BY score DESC
+                    LIMIT $limit
+                """, searchTerm=query, limit=limit, repo_id=repo_id)
+            else:
+                result = session.run("""
+                    CALL db.index.fulltext.queryNodes('function_docstring', $searchTerm)
+                    YIELD node, score
+                    RETURN node.id AS id, node.name AS name, node.signature AS signature,
+                           node.docstring AS docstring, score
+                    ORDER BY score DESC
+                    LIMIT $limit
+                """, searchTerm=query, limit=limit)
             return [dict(record) for record in result]
     
-    def search_classes(self, query: str, limit: int = 10) -> List[Dict]:
+    def search_classes(self, query: str, limit: int = 10, repo_id: str = None) -> List[Dict]:
         """Search classes by name or docstring"""
         with self.driver.session() as session:
-            result = session.run("""
-                CALL db.index.fulltext.queryNodes('class_docstring', $query)
-                YIELD node, score
-                RETURN node.id AS id, node.name AS name, 
-                       node.docstring AS docstring, score
-                ORDER BY score DESC
-                LIMIT $limit
-            """, query=query, limit=limit)
+            if repo_id:
+                result = session.run("""
+                    CALL db.index.fulltext.queryNodes('class_docstring', $searchTerm)
+                    YIELD node, score
+                    MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(:File)-[:DEFINES_CLASS]->(node)
+                    RETURN node.id AS id, node.name AS name,
+                           node.docstring AS docstring, score
+                    ORDER BY score DESC
+                    LIMIT $limit
+                """, searchTerm=query, limit=limit, repo_id=repo_id)
+            else:
+                result = session.run("""
+                    CALL db.index.fulltext.queryNodes('class_docstring', $searchTerm)
+                    YIELD node, score
+                    RETURN node.id AS id, node.name AS name,
+                           node.docstring AS docstring, score
+                    ORDER BY score DESC
+                    LIMIT $limit
+                """, searchTerm=query, limit=limit)
             return [dict(record) for record in result]
     
-    def find_function_by_name(self, name: str) -> List[Dict]:
+    def find_function_by_name(self, name: str, repo_id: str = None) -> List[Dict]:
         """Find functions by exact name"""
         with self.driver.session() as session:
-            result = session.run("""
-                MATCH (f:Function {name: $name})
-                OPTIONAL MATCH (file:File)-[:DEFINES_FUNCTION]->(f)
-                OPTIONAL MATCH (class:Class)-[:HAS_METHOD]->(f)
-                RETURN f.id AS id, f.name AS name, f.signature AS signature,
-                       f.docstring AS docstring, f.startLine AS startLine,
-                       file.path AS filePath, class.name AS className
-            """, name=name)
+            if repo_id:
+                result = session.run("""
+                    MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(file:File)-[:DEFINES_FUNCTION|HAS_METHOD*]->(f:Function {name: $name})
+                    OPTIONAL MATCH (class:Class)-[:HAS_METHOD]->(f)
+                    RETURN f.id AS id, f.name AS name, f.signature AS signature,
+                           f.docstring AS docstring, f.startLine AS startLine,
+                           file.path AS filePath, class.name AS className
+                """, name=name, repo_id=repo_id)
+            else:
+                result = session.run("""
+                    MATCH (f:Function {name: $name})
+                    OPTIONAL MATCH (file:File)-[:DEFINES_FUNCTION]->(f)
+                    OPTIONAL MATCH (class:Class)-[:HAS_METHOD]->(f)
+                    RETURN f.id AS id, f.name AS name, f.signature AS signature,
+                           f.docstring AS docstring, f.startLine AS startLine,
+                           file.path AS filePath, class.name AS className
+                """, name=name)
             return [dict(record) for record in result]
     
-    def find_class_by_name(self, name: str) -> List[Dict]:
+    def find_class_by_name(self, name: str, repo_id: str = None) -> List[Dict]:
         """Find classes by exact name"""
         with self.driver.session() as session:
-            result = session.run("""
-                MATCH (c:Class {name: $name})
-                OPTIONAL MATCH (file:File)-[:DEFINES_CLASS]->(c)
-                OPTIONAL MATCH (c)-[:EXTENDS]->(parent:Class)
-                OPTIONAL MATCH (c)-[:HAS_METHOD]->(method:Function)
-                RETURN c.id AS id, c.name AS name, c.docstring AS docstring,
-                       c.startLine AS startLine, file.path AS filePath,
-                       collect(DISTINCT parent.name) AS parentClasses,
-                       collect(DISTINCT method.name) AS methods
-            """, name=name)
+            if repo_id:
+                result = session.run("""
+                    MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(file:File)-[:DEFINES_CLASS]->(c:Class {name: $name})
+                    OPTIONAL MATCH (c)-[:EXTENDS]->(parent:Class)
+                    OPTIONAL MATCH (c)-[:HAS_METHOD]->(method:Function)
+                    RETURN c.id AS id, c.name AS name, c.docstring AS docstring,
+                           c.startLine AS startLine, file.path AS filePath,
+                           collect(DISTINCT parent.name) AS parentClasses,
+                           collect(DISTINCT method.name) AS methods
+                """, name=name, repo_id=repo_id)
+            else:
+                result = session.run("""
+                    MATCH (c:Class {name: $name})
+                    OPTIONAL MATCH (file:File)-[:DEFINES_CLASS]->(c)
+                    OPTIONAL MATCH (c)-[:EXTENDS]->(parent:Class)
+                    OPTIONAL MATCH (c)-[:HAS_METHOD]->(method:Function)
+                    RETURN c.id AS id, c.name AS name, c.docstring AS docstring,
+                           c.startLine AS startLine, file.path AS filePath,
+                           collect(DISTINCT parent.name) AS parentClasses,
+                           collect(DISTINCT method.name) AS methods
+                """, name=name)
             return [dict(record) for record in result]
     
-    def get_function_callgraph(self, function_id: str, depth: int = 2) -> Dict:
+    def get_function_callgraph(self, function_id: str, depth: int = 2, repo_id: str = None) -> Dict:
         """Get the call graph for a function"""
         with self.driver.session() as session:
-            result = session.run("""
-                MATCH path = (f:Function {id: $function_id})-[:CALLS*1..$depth]->(called:Function)
-                WITH f, collect(DISTINCT {
-                    id: called.id, 
-                    name: called.name,
-                    depth: length(path)
-                }) AS calls
-                RETURN f.id AS sourceId, f.name AS sourceName, calls
-            """, function_id=function_id, depth=depth)
+            if repo_id:
+                result = session.run("""
+                    MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(:File)-[:DEFINES_FUNCTION|HAS_METHOD*]->(f:Function {id: $function_id})
+                    WITH f
+                    MATCH path = (f)-[:CALLS*1..$depth]->(called:Function)
+                    WITH f, collect(DISTINCT {
+                        id: called.id,
+                        name: called.name,
+                        depth: length(path)
+                    }) AS calls
+                    RETURN f.id AS sourceId, f.name AS sourceName, calls
+                """, function_id=function_id, depth=depth, repo_id=repo_id)
+            else:
+                result = session.run("""
+                    MATCH path = (f:Function {id: $function_id})-[:CALLS*1..$depth]->(called:Function)
+                    WITH f, collect(DISTINCT {
+                        id: called.id,
+                        name: called.name,
+                        depth: length(path)
+                    }) AS calls
+                    RETURN f.id AS sourceId, f.name AS sourceName, calls
+                """, function_id=function_id, depth=depth)
             record = result.single()
             return dict(record) if record else {}
     
-    def get_class_hierarchy(self, class_name: str) -> Dict:
+    def get_class_hierarchy(self, class_name: str, repo_id: str = None) -> Dict:
         """Get class inheritance hierarchy"""
         with self.driver.session() as session:
-            result = session.run("""
-                MATCH (c:Class {name: $class_name})
-                OPTIONAL MATCH path = (c)-[:EXTENDS*]->(ancestor:Class)
-                OPTIONAL MATCH childPath = (child:Class)-[:EXTENDS*]->(c)
-                RETURN c.id AS id, c.name AS name,
-                       collect(DISTINCT ancestor.name) AS ancestors,
-                       collect(DISTINCT child.name) AS descendants
-            """, class_name=class_name)
+            if repo_id:
+                result = session.run("""
+                    MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(:File)-[:DEFINES_CLASS]->(c:Class {name: $class_name})
+                    OPTIONAL MATCH path = (c)-[:EXTENDS*]->(ancestor:Class)
+                    OPTIONAL MATCH childPath = (child:Class)-[:EXTENDS*]->(c)
+                    RETURN c.id AS id, c.name AS name,
+                           collect(DISTINCT ancestor.name) AS ancestors,
+                           collect(DISTINCT child.name) AS descendants
+                """, class_name=class_name, repo_id=repo_id)
+            else:
+                result = session.run("""
+                    MATCH (c:Class {name: $class_name})
+                    OPTIONAL MATCH path = (c)-[:EXTENDS*]->(ancestor:Class)
+                    OPTIONAL MATCH childPath = (child:Class)-[:EXTENDS*]->(c)
+                    RETURN c.id AS id, c.name AS name,
+                           collect(DISTINCT ancestor.name) AS ancestors,
+                           collect(DISTINCT child.name) AS descendants
+                """, class_name=class_name)
             record = result.single()
             return dict(record) if record else {}
     
-    def get_file_dependencies(self, file_path: str) -> Dict:
+    def get_file_dependencies(self, file_path: str, repo_id: str = None) -> Dict:
         """Get files that a file depends on and files that depend on it"""
         with self.driver.session() as session:
-            result = session.run("""
-                MATCH (f:File {path: $file_path})
-                OPTIONAL MATCH (f)-[:DEPENDS_ON]->(dep:File)
-                OPTIONAL MATCH (dependent:File)-[:DEPENDS_ON]->(f)
-                RETURN f.path AS filePath,
-                       collect(DISTINCT dep.path) AS dependsOn,
-                       collect(DISTINCT dependent.path) AS dependedBy
-            """, file_path=file_path)
+            if repo_id:
+                result = session.run("""
+                    MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(f:File {path: $file_path})
+                    OPTIONAL MATCH (f)-[:DEPENDS_ON]->(dep:File)
+                    OPTIONAL MATCH (dependent:File)-[:DEPENDS_ON]->(f)
+                    RETURN f.path AS filePath,
+                           collect(DISTINCT dep.path) AS dependsOn,
+                           collect(DISTINCT dependent.path) AS dependedBy
+                """, file_path=file_path, repo_id=repo_id)
+            else:
+                result = session.run("""
+                    MATCH (f:File {path: $file_path})
+                    OPTIONAL MATCH (f)-[:DEPENDS_ON]->(dep:File)
+                    OPTIONAL MATCH (dependent:File)-[:DEPENDS_ON]->(f)
+                    RETURN f.path AS filePath,
+                           collect(DISTINCT dep.path) AS dependsOn,
+                           collect(DISTINCT dependent.path) AS dependedBy
+                """, file_path=file_path)
             record = result.single()
             return dict(record) if record else {}
     
-    def find_similar_functions(self, function_id: str, limit: int = 5) -> List[Dict]:
+    def find_similar_functions(self, function_id: str, limit: int = 5, repo_id: str = None) -> List[Dict]:
         """Find functions with similar structure (same classes used, similar calls)"""
         with self.driver.session() as session:
-            result = session.run("""
-                MATCH (f:Function {id: $function_id})-[:CALLS]->(called:Function)
-                WITH f, collect(called) AS fCalls
-                MATCH (other:Function)-[:CALLS]->(otherCalled:Function)
-                WHERE other <> f AND otherCalled IN fCalls
-                WITH other, count(DISTINCT otherCalled) AS commonCalls, size(fCalls) AS totalCalls
-                WHERE commonCalls > 0
-                RETURN other.id AS id, other.name AS name, other.signature AS signature,
-                       commonCalls, toFloat(commonCalls) / totalCalls AS similarity
-                ORDER BY similarity DESC
-                LIMIT $limit
-            """, function_id=function_id, limit=limit)
+            if repo_id:
+                result = session.run("""
+                    MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(:File)-[:DEFINES_FUNCTION|HAS_METHOD*]->(f:Function {id: $function_id})
+                    WITH f
+                    MATCH (f)-[:CALLS]->(called:Function)
+                    WITH f, collect(called) AS fCalls
+                    MATCH (r2:Repository {id: $repo_id})-[:CONTAINS_FILE]->(:File)-[:DEFINES_FUNCTION|HAS_METHOD*]->(other:Function)-[:CALLS]->(otherCalled:Function)
+                    WHERE other <> f AND otherCalled IN fCalls
+                    WITH other, count(DISTINCT otherCalled) AS commonCalls, size(fCalls) AS totalCalls
+                    WHERE commonCalls > 0
+                    RETURN other.id AS id, other.name AS name, other.signature AS signature,
+                           commonCalls, toFloat(commonCalls) / totalCalls AS similarity
+                    ORDER BY similarity DESC
+                    LIMIT $limit
+                """, function_id=function_id, limit=limit, repo_id=repo_id)
+            else:
+                result = session.run("""
+                    MATCH (f:Function {id: $function_id})-[:CALLS]->(called:Function)
+                    WITH f, collect(called) AS fCalls
+                    MATCH (other:Function)-[:CALLS]->(otherCalled:Function)
+                    WHERE other <> f AND otherCalled IN fCalls
+                    WITH other, count(DISTINCT otherCalled) AS commonCalls, size(fCalls) AS totalCalls
+                    WHERE commonCalls > 0
+                    RETURN other.id AS id, other.name AS name, other.signature AS signature,
+                           commonCalls, toFloat(commonCalls) / totalCalls AS similarity
+                    ORDER BY similarity DESC
+                    LIMIT $limit
+                """, function_id=function_id, limit=limit)
             return [dict(record) for record in result]
     
-    def get_code_context(self, entity_id: str) -> Dict:
+    def get_code_context(self, entity_id: str, repo_id: str = None) -> Dict:
         """Get comprehensive context for a code entity (function or class)"""
         with self.driver.session() as session:
-            result = session.run("""
-                // Try to find as function first
-                OPTIONAL MATCH (f:Function {id: $entity_id})
-                OPTIONAL MATCH (file:File)-[:DEFINES_FUNCTION]->(f)
-                OPTIONAL MATCH (class:Class)-[:HAS_METHOD]->(f)
-                OPTIONAL MATCH (f)-[:CALLS]->(called:Function)
-                OPTIONAL MATCH (caller:Function)-[:CALLS]->(f)
-                OPTIONAL MATCH (f)-[:USES_CLASS]->(usedClass:Class)
-                
-                WITH f, file, class, 
-                     collect(DISTINCT {id: called.id, name: called.name}) AS calls,
-                     collect(DISTINCT {id: caller.id, name: caller.name}) AS calledBy,
-                     collect(DISTINCT usedClass.name) AS usesClasses
-                WHERE f IS NOT NULL
-                
-                RETURN 'function' AS type,
-                       f.id AS id, f.name AS name, f.signature AS signature,
-                       f.docstring AS docstring, f.startLine AS startLine, f.endLine AS endLine,
-                       file.path AS filePath, class.name AS className,
-                       calls, calledBy, usesClasses
-                       
-                UNION
-                
-                // Try to find as class
-                MATCH (c:Class {id: $entity_id})
-                OPTIONAL MATCH (file:File)-[:DEFINES_CLASS]->(c)
-                OPTIONAL MATCH (c)-[:HAS_METHOD]->(method:Function)
-                OPTIONAL MATCH (c)-[:EXTENDS]->(parent:Class)
-                OPTIONAL MATCH (child:Class)-[:EXTENDS]->(c)
-                OPTIONAL MATCH (c)-[:HAS_VARIABLE]->(var:Variable)
-                
-                RETURN 'class' AS type,
-                       c.id AS id, c.name AS name, null AS signature,
-                       c.docstring AS docstring, c.startLine AS startLine, c.endLine AS endLine,
-                       file.path AS filePath, null AS className,
-                       collect(DISTINCT {id: method.id, name: method.name}) AS calls,
-                       collect(DISTINCT {name: parent.name}) AS calledBy,
-                       collect(DISTINCT var.name) AS usesClasses
-            """, entity_id=entity_id)
-            
+            if repo_id:
+                result = session.run("""
+                    // Try to find as function first, scoped to repo
+                    OPTIONAL MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(file:File)-[:DEFINES_FUNCTION|HAS_METHOD*]->(f:Function {id: $entity_id})
+                    OPTIONAL MATCH (class:Class)-[:HAS_METHOD]->(f)
+                    OPTIONAL MATCH (f)-[:CALLS]->(called:Function)
+                    OPTIONAL MATCH (caller:Function)-[:CALLS]->(f)
+                    OPTIONAL MATCH (f)-[:USES_CLASS]->(usedClass:Class)
+
+                    WITH f, file, class,
+                         collect(DISTINCT {id: called.id, name: called.name}) AS calls,
+                         collect(DISTINCT {id: caller.id, name: caller.name}) AS calledBy,
+                         collect(DISTINCT usedClass.name) AS usesClasses
+                    WHERE f IS NOT NULL
+
+                    RETURN 'function' AS type,
+                           f.id AS id, f.name AS name, f.signature AS signature,
+                           f.docstring AS docstring, f.startLine AS startLine, f.endLine AS endLine,
+                           file.path AS filePath, class.name AS className,
+                           calls, calledBy, usesClasses
+
+                    UNION
+
+                    // Try to find as class, scoped to repo
+                    MATCH (r2:Repository {id: $repo_id})-[:CONTAINS_FILE]->(file:File)-[:DEFINES_CLASS]->(c:Class {id: $entity_id})
+                    OPTIONAL MATCH (c)-[:HAS_METHOD]->(method:Function)
+                    OPTIONAL MATCH (c)-[:EXTENDS]->(parent:Class)
+                    OPTIONAL MATCH (child:Class)-[:EXTENDS]->(c)
+                    OPTIONAL MATCH (c)-[:HAS_VARIABLE]->(var:Variable)
+
+                    RETURN 'class' AS type,
+                           c.id AS id, c.name AS name, null AS signature,
+                           c.docstring AS docstring, c.startLine AS startLine, c.endLine AS endLine,
+                           file.path AS filePath, null AS className,
+                           collect(DISTINCT {id: method.id, name: method.name}) AS calls,
+                           collect(DISTINCT {name: parent.name}) AS calledBy,
+                           collect(DISTINCT var.name) AS usesClasses
+                """, entity_id=entity_id, repo_id=repo_id)
+            else:
+                result = session.run("""
+                    // Try to find as function first
+                    OPTIONAL MATCH (f:Function {id: $entity_id})
+                    OPTIONAL MATCH (file:File)-[:DEFINES_FUNCTION]->(f)
+                    OPTIONAL MATCH (class:Class)-[:HAS_METHOD]->(f)
+                    OPTIONAL MATCH (f)-[:CALLS]->(called:Function)
+                    OPTIONAL MATCH (caller:Function)-[:CALLS]->(f)
+                    OPTIONAL MATCH (f)-[:USES_CLASS]->(usedClass:Class)
+
+                    WITH f, file, class,
+                         collect(DISTINCT {id: called.id, name: called.name}) AS calls,
+                         collect(DISTINCT {id: caller.id, name: caller.name}) AS calledBy,
+                         collect(DISTINCT usedClass.name) AS usesClasses
+                    WHERE f IS NOT NULL
+
+                    RETURN 'function' AS type,
+                           f.id AS id, f.name AS name, f.signature AS signature,
+                           f.docstring AS docstring, f.startLine AS startLine, f.endLine AS endLine,
+                           file.path AS filePath, class.name AS className,
+                           calls, calledBy, usesClasses
+
+                    UNION
+
+                    // Try to find as class
+                    MATCH (c:Class {id: $entity_id})
+                    OPTIONAL MATCH (file:File)-[:DEFINES_CLASS]->(c)
+                    OPTIONAL MATCH (c)-[:HAS_METHOD]->(method:Function)
+                    OPTIONAL MATCH (c)-[:EXTENDS]->(parent:Class)
+                    OPTIONAL MATCH (child:Class)-[:EXTENDS]->(c)
+                    OPTIONAL MATCH (c)-[:HAS_VARIABLE]->(var:Variable)
+
+                    RETURN 'class' AS type,
+                           c.id AS id, c.name AS name, null AS signature,
+                           c.docstring AS docstring, c.startLine AS startLine, c.endLine AS endLine,
+                           file.path AS filePath, null AS className,
+                           collect(DISTINCT {id: method.id, name: method.name}) AS calls,
+                           collect(DISTINCT {name: parent.name}) AS calledBy,
+                           collect(DISTINCT var.name) AS usesClasses
+                """, entity_id=entity_id)
+
             records = list(result)
             if records:
                 return dict(records[0])
             return {}
     
-    def semantic_code_search(self, query: str, limit: int = 20) -> List[Dict]:
+    def semantic_code_search(self, query: str, limit: int = 20, repo_id: str = None) -> List[Dict]:
         """
         Semantic search across all code entities.
         Returns functions, classes, and files matching the query.
         """
         results = []
-        
+
         with self.driver.session() as session:
-            # Search functions
-            func_result = session.run("""
-                MATCH (f:Function)
-                WHERE f.name CONTAINS $query 
-                   OR f.docstring CONTAINS $query
-                   OR f.signature CONTAINS $query
-                OPTIONAL MATCH (file:File)-[:DEFINES_FUNCTION|HAS_METHOD*]->(f)
-                RETURN 'function' AS type, f.id AS id, f.name AS name,
-                       f.docstring AS description, file.path AS location,
-                       f.startLine AS startLine
-                LIMIT $limit
-            """, query=query, limit=limit)
-            results.extend([dict(r) for r in func_result])
-            
-            # Search classes
-            class_result = session.run("""
-                MATCH (c:Class)
-                WHERE c.name CONTAINS $query 
-                   OR c.docstring CONTAINS $query
-                OPTIONAL MATCH (file:File)-[:DEFINES_CLASS]->(c)
-                RETURN 'class' AS type, c.id AS id, c.name AS name,
-                       c.docstring AS description, file.path AS location,
-                       c.startLine AS startLine
-                LIMIT $limit
-            """, query=query, limit=limit)
-            results.extend([dict(r) for r in class_result])
-            
-            # Search files
-            file_result = session.run("""
-                MATCH (f:File)
-                WHERE f.name CONTAINS $query 
-                   OR f.path CONTAINS $query
-                RETURN 'file' AS type, f.id AS id, f.name AS name,
-                       f.path AS description, f.path AS location,
-                       0 AS startLine
-                LIMIT $limit
-            """, query=query, limit=limit)
-            results.extend([dict(r) for r in file_result])
-        
+            if repo_id:
+                # Search functions scoped to repo
+                func_result = session.run("""
+                    MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(file:File)-[:DEFINES_FUNCTION|HAS_METHOD*]->(f:Function)
+                    WHERE f.name CONTAINS $searchTerm
+                       OR f.docstring CONTAINS $searchTerm
+                       OR f.signature CONTAINS $searchTerm
+                    RETURN 'function' AS type, f.id AS id, f.name AS name,
+                           f.docstring AS description, file.path AS location,
+                           f.startLine AS startLine
+                    LIMIT $limit
+                """, searchTerm=query, limit=limit, repo_id=repo_id)
+                results.extend([dict(r) for r in func_result])
+
+                # Search classes scoped to repo
+                class_result = session.run("""
+                    MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(file:File)-[:DEFINES_CLASS]->(c:Class)
+                    WHERE c.name CONTAINS $searchTerm
+                       OR c.docstring CONTAINS $searchTerm
+                    RETURN 'class' AS type, c.id AS id, c.name AS name,
+                           c.docstring AS description, file.path AS location,
+                           c.startLine AS startLine
+                    LIMIT $limit
+                """, searchTerm=query, limit=limit, repo_id=repo_id)
+                results.extend([dict(r) for r in class_result])
+
+                # Search files scoped to repo
+                file_result = session.run("""
+                    MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(f:File)
+                    WHERE f.name CONTAINS $searchTerm
+                       OR f.path CONTAINS $searchTerm
+                    RETURN 'file' AS type, f.id AS id, f.name AS name,
+                           f.path AS description, f.path AS location,
+                           0 AS startLine
+                    LIMIT $limit
+                """, searchTerm=query, limit=limit, repo_id=repo_id)
+                results.extend([dict(r) for r in file_result])
+            else:
+                # Search functions
+                func_result = session.run("""
+                    MATCH (f:Function)
+                    WHERE f.name CONTAINS $searchTerm
+                       OR f.docstring CONTAINS $searchTerm
+                       OR f.signature CONTAINS $searchTerm
+                    OPTIONAL MATCH (file:File)-[:DEFINES_FUNCTION|HAS_METHOD*]->(f)
+                    RETURN 'function' AS type, f.id AS id, f.name AS name,
+                           f.docstring AS description, file.path AS location,
+                           f.startLine AS startLine
+                    LIMIT $limit
+                """, searchTerm=query, limit=limit)
+                results.extend([dict(r) for r in func_result])
+
+                # Search classes
+                class_result = session.run("""
+                    MATCH (c:Class)
+                    WHERE c.name CONTAINS $searchTerm
+                       OR c.docstring CONTAINS $searchTerm
+                    OPTIONAL MATCH (file:File)-[:DEFINES_CLASS]->(c)
+                    RETURN 'class' AS type, c.id AS id, c.name AS name,
+                           c.docstring AS description, file.path AS location,
+                           c.startLine AS startLine
+                    LIMIT $limit
+                """, searchTerm=query, limit=limit)
+                results.extend([dict(r) for r in class_result])
+
+                # Search files
+                file_result = session.run("""
+                    MATCH (f:File)
+                    WHERE f.name CONTAINS $searchTerm
+                       OR f.path CONTAINS $searchTerm
+                    RETURN 'file' AS type, f.id AS id, f.name AS name,
+                           f.path AS description, f.path AS location,
+                           0 AS startLine
+                    LIMIT $limit
+                """, searchTerm=query, limit=limit)
+                results.extend([dict(r) for r in file_result])
+
         return results[:limit]
 
-
-def ingest_repository(repo_path: str, neo4j_uri: str = None, 
+def ingest_repository(repo_path: str, repo_id: str = None, neo4j_uri: str = None, 
                       neo4j_user: str = None, neo4j_password: str = None) -> Dict:
     """
     Convenience function to parse and ingest a repository.
@@ -530,7 +697,7 @@ def ingest_repository(repo_path: str, neo4j_uri: str = None,
     
     # Parse the repository
     print(f"Parsing repository: {repo_path}")
-    codebase = parse_repository(repo_path)
+    codebase = parse_repository(repo_path, repo_id)
     
     # Ingest into Neo4j
     ingester = Neo4jIngester(neo4j_uri, neo4j_user, neo4j_password)
