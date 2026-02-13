@@ -17,7 +17,8 @@ def run_cli(*args, expect_success=True) -> subprocess.CompletedProcess:
     result = subprocess.run(
         [sys.executable, CLI_PATH, *args],
         capture_output=True, text=True,
-        env={**os.environ, "PYTHONPATH": str(Path(__file__).parent.parent)},
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).parent.parent),
+             "NEO4J_PASSWORD": "testpass"},
     )
     if expect_success:
         assert result.returncode == 0, (

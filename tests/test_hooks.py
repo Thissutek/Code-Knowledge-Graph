@@ -16,7 +16,7 @@ from src.hooks.hook_manager import HookManager, HOOK_NAMES, CODE_KAG_MARKER
 class TestHookInstall:
     def test_installs_all_hooks(self, git_repo):
         hm = HookManager()
-        hm.install(str(git_repo), repo_id="test")
+        hm.install(str(git_repo), repo_id="test", neo4j_password="testpass")
 
         hooks_dir = git_repo / ".git" / "hooks"
         for name in HOOK_NAMES:
@@ -24,14 +24,14 @@ class TestHookInstall:
 
     def test_common_script_installed(self, git_repo):
         hm = HookManager()
-        hm.install(str(git_repo), repo_id="test")
+        hm.install(str(git_repo), repo_id="test", neo4j_password="testpass")
 
         common = git_repo / ".git" / "hooks" / "code-kag-common.sh"
         assert common.exists()
 
     def test_hooks_are_executable(self, git_repo):
         hm = HookManager()
-        hm.install(str(git_repo), repo_id="test")
+        hm.install(str(git_repo), repo_id="test", neo4j_password="testpass")
 
         hooks_dir = git_repo / ".git" / "hooks"
         for name in HOOK_NAMES:
@@ -43,6 +43,7 @@ class TestHookInstall:
         hm.install(
             str(git_repo), repo_id="my-proj",
             mode="full", neo4j_uri="bolt://db:7687",
+            neo4j_password="testpass",
         )
 
         common = (git_repo / ".git" / "hooks" / "code-kag-common.sh").read_text()
@@ -53,7 +54,7 @@ class TestHookInstall:
 
     def test_default_repo_id_is_dirname(self, git_repo):
         hm = HookManager()
-        hm.install(str(git_repo))
+        hm.install(str(git_repo), neo4j_password="testpass")
 
         common = (git_repo / ".git" / "hooks" / "code-kag-common.sh").read_text()
         assert git_repo.name in common
@@ -65,7 +66,7 @@ class TestHookInstall:
         existing.chmod(existing.stat().st_mode | stat.S_IXUSR)
 
         hm = HookManager()
-        hm.install(str(git_repo), repo_id="test")
+        hm.install(str(git_repo), repo_id="test", neo4j_password="testpass")
 
         # Backup should exist
         backup = hooks_dir / "post-commit.pre-code-kag"
@@ -79,10 +80,10 @@ class TestHookInstall:
 
     def test_reinstall_updates_existing_code_kag_hook(self, git_repo):
         hm = HookManager()
-        hm.install(str(git_repo), repo_id="v1")
+        hm.install(str(git_repo), repo_id="v1", neo4j_password="testpass")
 
         # Install again with different repo_id
-        hm.install(str(git_repo), repo_id="v2")
+        hm.install(str(git_repo), repo_id="v2", neo4j_password="testpass")
 
         common = (git_repo / ".git" / "hooks" / "code-kag-common.sh").read_text()
         assert "v2" in common
@@ -90,7 +91,7 @@ class TestHookInstall:
     def test_raises_for_non_git_dir(self, tmp_dir):
         hm = HookManager()
         with pytest.raises(FileNotFoundError, match="Not a git repository"):
-            hm.install(str(tmp_dir), repo_id="x")
+            hm.install(str(tmp_dir), repo_id="x", neo4j_password="testpass")
 
 
 # ── HookManager.uninstall ──────────────────────────────────────────────────
@@ -98,7 +99,7 @@ class TestHookInstall:
 class TestHookUninstall:
     def test_removes_all_hooks(self, git_repo):
         hm = HookManager()
-        hm.install(str(git_repo), repo_id="test")
+        hm.install(str(git_repo), repo_id="test", neo4j_password="testpass")
         hm.uninstall(str(git_repo))
 
         hooks_dir = git_repo / ".git" / "hooks"
@@ -113,7 +114,7 @@ class TestHookUninstall:
         existing.chmod(existing.stat().st_mode | stat.S_IXUSR)
 
         hm = HookManager()
-        hm.install(str(git_repo), repo_id="test")
+        hm.install(str(git_repo), repo_id="test", neo4j_password="testpass")
         hm.uninstall(str(git_repo))
 
         restored = hooks_dir / "post-commit"
@@ -125,7 +126,7 @@ class TestHookUninstall:
 
     def test_uninstall_idempotent(self, git_repo):
         hm = HookManager()
-        hm.install(str(git_repo), repo_id="test")
+        hm.install(str(git_repo), repo_id="test", neo4j_password="testpass")
         hm.uninstall(str(git_repo))
         hm.uninstall(str(git_repo))  # Should not raise
 
@@ -140,14 +141,14 @@ class TestHookUninstall:
 class TestHookTemplates:
     def test_post_commit_references_common(self, git_repo):
         hm = HookManager()
-        hm.install(str(git_repo), repo_id="test")
+        hm.install(str(git_repo), repo_id="test", neo4j_password="testpass")
 
         content = (git_repo / ".git" / "hooks" / "post-commit").read_text()
         assert "code-kag-common.sh" in content
 
     def test_post_commit_uses_diff_tree(self, git_repo):
         hm = HookManager()
-        hm.install(str(git_repo), repo_id="test")
+        hm.install(str(git_repo), repo_id="test", neo4j_password="testpass")
 
         content = (git_repo / ".git" / "hooks" / "post-commit").read_text()
         assert "git diff-tree" in content
@@ -155,14 +156,14 @@ class TestHookTemplates:
 
     def test_post_merge_uses_orig_head(self, git_repo):
         hm = HookManager()
-        hm.install(str(git_repo), repo_id="test")
+        hm.install(str(git_repo), repo_id="test", neo4j_password="testpass")
 
         content = (git_repo / ".git" / "hooks" / "post-merge").read_text()
         assert "ORIG_HEAD" in content
 
     def test_post_checkout_checks_flag(self, git_repo):
         hm = HookManager()
-        hm.install(str(git_repo), repo_id="test")
+        hm.install(str(git_repo), repo_id="test", neo4j_password="testpass")
 
         content = (git_repo / ".git" / "hooks" / "post-checkout").read_text()
         # Should only re-index on branch switch (flag=1)
@@ -170,7 +171,7 @@ class TestHookTemplates:
 
     def test_post_rewrite_uses_full_mode(self, git_repo):
         hm = HookManager()
-        hm.install(str(git_repo), repo_id="test")
+        hm.install(str(git_repo), repo_id="test", neo4j_password="testpass")
 
         content = (git_repo / ".git" / "hooks" / "post-rewrite").read_text()
         assert "full" in content.lower()
