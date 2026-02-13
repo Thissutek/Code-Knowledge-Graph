@@ -167,6 +167,9 @@ python cli.py hooks install /path/to/repo --id my-project --mode incremental
 
 # Install hooks with full re-index mode
 python cli.py hooks install /path/to/repo --id my-project --mode full
+
+# With custom Neo4j credentials
+python cli.py --neo4j-password code-kag-password hooks install /path/to/repo --id my-project
 ```
 
 ### Uninstall Hooks
@@ -184,7 +187,15 @@ python cli.py hooks uninstall /path/to/repo
 | `post-checkout` | Branch switch | Full re-index |
 | `post-rewrite` | After rebase/amend | Full re-index |
 
-Hooks include lockfile-based debouncing to prevent concurrent re-index runs. Existing hooks are preserved by backing them up to `*.pre-code-kag` and chaining them.
+### Hook Features
+
+- **Neo4j connectivity check** — hooks verify Neo4j is reachable before attempting re-index. If not, a warning is printed with a manual re-index command
+- **Logging** — all re-index runs are logged to `/tmp/code-kag-reindex-{REPO_ID}.log` with timestamps and success/failure status
+- **Python auto-detection** — hooks prefer the project's `.venv/bin/python`, then `python3`, then `python`
+- **Credential passthrough** — Neo4j URI, username, and password are baked into the hooks at install time
+- **Lockfile debouncing** — prevents concurrent re-index runs
+- **Hook chaining** — existing hooks are preserved by backing them up to `*.pre-code-kag` and chaining them
+- **Shell injection protection** — all template values are validated against unsafe characters
 
 ## Available MCP Tools (13)
 
@@ -338,8 +349,14 @@ python cli.py index /path/to/repo --id project-name --incremental --changed-file
 # Install git hooks for automatic re-indexing
 python cli.py hooks install /path/to/repo --id project-name --mode incremental
 
+# Install hooks with custom Neo4j credentials
+python cli.py --neo4j-password code-kag-password hooks install /path/to/repo --id project-name
+
 # Uninstall git hooks
 python cli.py hooks uninstall /path/to/repo
+
+# Check hook re-index log
+cat /tmp/code-kag-reindex-project-name.log
 
 # Search code (all repos)
 python cli.py search "authentication"
