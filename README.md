@@ -148,9 +148,15 @@ Then start the MCP server:
 
 See [docs/INDEXING_FLOW.md](docs/INDEXING_FLOW.md) for detailed sequence diagram.
 
-## 🔧 Available Tools
+## 🔧 Available MCP Tools (13)
 
 All query tools accept an optional `repo_id` parameter to scope results to a single repository. Omit it to search across all indexed repos.
+
+### index_repository
+Index a repository into the knowledge graph. Parses all Python files and creates nodes/relationships in Neo4j.
+```
+"Index the project at /repos/my-app with ID my-app"
+```
 
 ### search_code
 Search for functions, classes, or files by name or content.
@@ -207,6 +213,24 @@ Identify complex functions that might need refactoring.
 "Show me the most complex functions"
 ```
 
+### get_code_context
+Get comprehensive context for any code entity including all relationships.
+```
+"Give me the full context for the UserService class"
+```
+
+### get_graph_stats
+Get per-repository statistics about the knowledge graph (files, classes, functions, etc.).
+```
+"Show me stats for my-project"
+```
+
+### health_check
+Check the health of the Code-KAG system (Neo4j connectivity, node counts, uptime).
+```
+"Is the code-kag system healthy?"
+```
+
 ## 📁 Project Structure
 
 ```
@@ -215,11 +239,19 @@ code-kag/
 │   ├── __init__.py
 │   ├── models.py          # Data models for code entities
 │   ├── parser.py          # Python AST parser
+│   ├── languages.py       # Language parser registry (Python, TS, Java, etc.)
 │   ├── neo4j_ingester.py  # Neo4j ingestion and queries
 │   └── mcp_server.py      # MCP server implementation
 ├── config/
 │   └── mcp_config.example.json
+├── scripts/               # Utility scripts
+├── docs/                  # Documentation
+│   └── INDEXING_FLOW.md   # Detailed indexing sequence diagram
 ├── cli.py                 # Command-line interface
+├── Dockerfile             # Container image definition
+├── docker-compose.yml     # Neo4j + MCP server orchestration
+├── healthcheck.py         # Docker health check script
+├── start.sh               # Convenience script for Docker commands
 ├── requirements.txt
 ├── setup.py
 └── README.md

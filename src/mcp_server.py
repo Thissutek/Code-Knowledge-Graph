@@ -702,7 +702,8 @@ async def handle_get_graph_stats(arguments: Dict[str, Any]) -> str:
             OPTIONAL MATCH (r)-[:CONTAINS_FILE]->(:File)-[:DEFINES_FUNCTION]->(func:Function)
             WITH r, files, modules, classes, count(DISTINCT func) AS topLevelFuncs
             OPTIONAL MATCH (r)-[:CONTAINS_FILE]->(:File)-[:DEFINES_CLASS]->(:Class)-[:HAS_METHOD]->(m2:Function)
-            WITH r, files, modules, classes, topLevelFuncs + count(DISTINCT m2) AS functions
+            WITH r, files, modules, classes, topLevelFuncs, count(DISTINCT m2) AS methodCount
+            WITH r, files, modules, classes, topLevelFuncs + methodCount AS functions
             OPTIONAL MATCH (r)-[:CONTAINS_FILE]->(:File)-[:IMPORTS]->(i:Import)
             RETURN r.id AS repo_id, r.name AS name, r.lastIndexed AS lastIndexed,
                    files, modules, classes, functions, count(DISTINCT i) AS imports

@@ -406,29 +406,32 @@ class CodeKAGQuerier:
     
     def get_function_callgraph(self, function_id: str, depth: int = 2, repo_id: str = None) -> Dict:
         """Get the call graph for a function"""
+        # Neo4j doesn't allow parameters in variable-length path bounds,
+        # so we sanitize depth as an int and interpolate it into the query.
+        safe_depth = int(depth)
         with self.driver.session() as session:
             if repo_id:
-                result = session.run("""
-                    MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(:File)-[:DEFINES_FUNCTION|HAS_METHOD*]->(f:Function {id: $function_id})
+                result = session.run(f"""
+                    MATCH (r:Repository {{id: $repo_id}})-[:CONTAINS_FILE]->(:File)-[:DEFINES_FUNCTION|HAS_METHOD*]->(f:Function {{id: $function_id}})
                     WITH f
-                    MATCH path = (f)-[:CALLS*1..$depth]->(called:Function)
-                    WITH f, collect(DISTINCT {
+                    MATCH path = (f)-[:CALLS*1..{safe_depth}]->(called:Function)
+                    WITH f, collect(DISTINCT {{
                         id: called.id,
                         name: called.name,
                         depth: length(path)
-                    }) AS calls
+                    }}) AS calls
                     RETURN f.id AS sourceId, f.name AS sourceName, calls
-                """, function_id=function_id, depth=depth, repo_id=repo_id)
+                """, function_id=function_id, repo_id=repo_id)
             else:
-                result = session.run("""
-                    MATCH path = (f:Function {id: $function_id})-[:CALLS*1..$depth]->(called:Function)
-                    WITH f, collect(DISTINCT {
+                result = session.run(f"""
+                    MATCH path = (f:Function {{id: $function_id}})-[:CALLS*1..{safe_depth}]->(called:Function)
+                    WITH f, collect(DISTINCT {{
                         id: called.id,
                         name: called.name,
                         depth: length(path)
-                    }) AS calls
+                    }}) AS calls
                     RETURN f.id AS sourceId, f.name AS sourceName, calls
-                """, function_id=function_id, depth=depth)
+                """, function_id=function_id)
             record = result.single()
             return dict(record) if record else {}
     
