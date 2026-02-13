@@ -59,18 +59,20 @@ code_kag_reindex() {
 
         if [ "$mode" = "incremental" ] && [ ${#files[@]} -gt 0 ]; then
             echo "[code-kag] Incremental re-index: ${#files[@]} file(s)"
-            "$PYTHON" "$CODE_KAG_PATH/cli.py" index "$(pwd)" \
-                --id "$REPO_ID" \
+            "$PYTHON" "$CODE_KAG_PATH/cli.py" \
                 --neo4j-uri "$NEO4J_URI" \
+                index "$(pwd)" \
+                --id "$REPO_ID" \
                 --incremental \
                 --changed-files "${files[@]}" \
                 >> "$LOGFILE" 2>&1
             exit_code=$?
         else
             echo "[code-kag] Full re-index"
-            "$PYTHON" "$CODE_KAG_PATH/cli.py" index "$(pwd)" \
-                --id "$REPO_ID" \
+            "$PYTHON" "$CODE_KAG_PATH/cli.py" \
                 --neo4j-uri "$NEO4J_URI" \
+                index "$(pwd)" \
+                --id "$REPO_ID" \
                 >> "$LOGFILE" 2>&1
             exit_code=$?
         fi
