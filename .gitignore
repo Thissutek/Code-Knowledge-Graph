@@ -7,4 +7,5 @@ venv/
 *.egg-info/
 dist/
 build/
+CLAUDE.md
 

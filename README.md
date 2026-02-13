@@ -66,8 +66,8 @@ Everything runs in containers, no local installation needed!
 ### 1. Clone and Start
 
 ```bash
-git clone https://github.com/yourusername/code-kag.git
-cd code-kag
+git clone https://github.com/Thissutek/Code-Knowledge-Graph.git
+cd Code-Knowledge-Graph
 
 # Set up credentials
 cp .env.example .env
@@ -105,23 +105,35 @@ LIMIT 10
 
 ### 4. Configure MCP for Claude
 
-Add to `~/.config/claude/claude_desktop_config.json`:
+Start the MCP server:
+```bash
+./start.sh mcp
+```
+
+**Claude Desktop** — add to `~/.config/claude/claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "code-kag": {
       "command": "docker",
-      "args": ["exec", "-i", "code-kag-server", "python", "src/mcp_server.py"],
-      "env": {}
+      "args": ["exec", "-i", "code-kag-server", "python", "src/mcp_server.py"]
     }
   }
 }
 ```
 
-Then start the MCP server:
-```bash
-./start.sh mcp
+**Claude Code** — add to `.claude/settings.json` or `~/.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "code-kag": {
+      "command": "docker",
+      "args": ["exec", "-i", "code-kag-server", "python", "src/mcp_server.py"]
+    }
+  }
+}
 ```
 
 ## How Indexing Works
@@ -334,6 +346,7 @@ code-kag/
 ├── cli.py                     # CLI — index, hooks install/uninstall
 ├── Dockerfile
 ├── docker-compose.yml
+├── .env.example               # Template for Neo4j credentials
 ├── healthcheck.py
 ├── start.sh
 ├── requirements.txt
@@ -390,6 +403,40 @@ python cli.py stats
 | `NEO4J_USERNAME` | `neo4j` | Neo4j username |
 | `NEO4J_PASSWORD` | *(required)* | Neo4j password — set in `.env` or pass via `--neo4j-password` |
 
+## Local Installation (without Docker)
+
+If you prefer running without Docker, you'll need a local Neo4j instance.
+
+```bash
+# Clone and set up
+git clone https://github.com/Thissutek/Code-Knowledge-Graph.git
+cd Code-Knowledge-Graph
+
+# Create virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+pip install -e .
+
+# Set up credentials
+cp .env.example .env
+# Edit .env and set your NEO4J_PASSWORD
+
+# Export for CLI use
+export NEO4J_PASSWORD=your-password
+
+# Index a repository
+python cli.py index /path/to/repo --id my-project
+
+# Install git hooks for auto re-indexing
+python cli.py hooks install /path/to/repo --id my-project
+
+# Start the MCP server
+python cli.py serve
+```
+
 ## Development
 
 ```bash
@@ -400,6 +447,10 @@ source .venv/bin/activate
 # Install dependencies
 pip install -r requirements.txt
 pip install pytest
+
+# Set up credentials for local Neo4j
+cp .env.example .env
+# Edit .env with your Neo4j password
 
 # Run tests (206 tests)
 pytest tests/ -v
