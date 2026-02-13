@@ -2,13 +2,13 @@
 
 A **Knowledge-Augmented Generation (KAG)** system for code that creates a Neo4j graph database of your codebase, enabling semantic code search and intelligent context retrieval for AI assistants.
 
-## 🎯 What It Does
+## What It Does
 
 Code-KAG parses your codebase and creates a knowledge graph with:
 
-- **Files, Modules, Classes, Functions** as nodes
-- **Relationships** like CALLS, IMPORTS, EXTENDS, DEPENDS_ON
-- **Rich metadata** including docstrings, signatures, complexity metrics
+- **Files, Modules, Classes, Functions, Interfaces** as nodes
+- **Relationships** like CALLS, IMPORTS, EXTENDS, IMPLEMENTS, DEPENDS_ON
+- **Rich metadata** including docstrings, signatures, complexity metrics, language types
 
 This graph enables AI assistants to:
 - Find relevant code by semantic search
@@ -17,18 +17,18 @@ This graph enables AI assistants to:
 - Identify related/similar code
 - Get comprehensive context for any code entity
 
-## 🌐 Supported Languages
+## Supported Languages
 
-| Language | Status | Parser |
-|----------|--------|--------|
-| **Python** | ✅ Full support | Python AST |
-| TypeScript/JavaScript | 🚧 Planned | tree-sitter |
-| Java | 🚧 Planned | tree-sitter |
-| Go | 🚧 Planned | tree-sitter |
-| Rust | 🚧 Planned | tree-sitter |
-| C/C++ | 🚧 Planned | tree-sitter |
+| Language | Extensions | Parser | Entity Mapping |
+|----------|-----------|--------|----------------|
+| **Python** | `.py`, `.pyw` | stdlib `ast` | Classes, functions, variables, imports |
+| **TypeScript/JavaScript** | `.ts`, `.tsx`, `.js`, `.jsx` | tree-sitter | Classes, interfaces, enums, arrow functions, ES6 imports |
+| **Java** | `.java` | tree-sitter | Classes, enums, interfaces, annotations, access modifiers |
+| **Go** | `.go` | tree-sitter | Structs, interfaces, receiver methods, visibility by capitalization |
+| **Rust** | `.rs` | tree-sitter | Structs, enums, traits, impl blocks, `pub` visibility |
+| **C/C++** | `.c`, `.cpp`, `.cc`, `.cxx`, `.h`, `.hpp`, `.hxx` | tree-sitter | Classes, structs, namespaces, `#include` imports |
 
-## 📊 Data Model
+## Data Model
 
 ```mermaid
 graph TD
@@ -47,7 +47,19 @@ graph TD
     File -->|DEPENDS_ON| File
 ```
 
-## 🚀 Quick Start (Docker - Recommended)
+### Language Type Mapping
+
+The `Class` node includes a `languageType` property to preserve language-specific semantics:
+
+| `languageType` | Used For |
+|----------------|----------|
+| `class` | Python classes, Java classes, TypeScript classes, C++ classes |
+| `struct` | Go structs, Rust structs, C/C++ structs |
+| `enum` | Java enums, TypeScript enums, Rust enums, C++ enums |
+| `trait` | Rust traits |
+| `interface` | Go interfaces, Java interfaces, TypeScript interfaces |
+
+## Quick Start (Docker - Recommended)
 
 Everything runs in containers, no local installation needed!
 
@@ -67,7 +79,7 @@ chmod +x start.sh
 ### 2. Index Your Code
 
 ```bash
-# Index a repository
+# Index a repository (all supported languages)
 ./start.sh index /path/to/your/project
 
 # Or with a custom ID
@@ -83,7 +95,7 @@ Open http://localhost:7474 in your browser:
 Try this query:
 ```cypher
 MATCH (c:Class)-[:HAS_METHOD]->(f:Function)
-RETURN c.name, collect(f.name) as methods
+RETURN c.name, c.languageType, collect(f.name) as methods
 LIMIT 10
 ```
 
@@ -108,52 +120,78 @@ Then start the MCP server:
 ./start.sh mcp
 ```
 
-## 🔄 How Indexing Works
+## How Indexing Works
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    INDEXING SEQUENCE                            │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  1. DISCOVERY                                                   │
-│     └─→ Walk directory tree                                     │
-│     └─→ Find all .py files                                      │
-│     └─→ Skip __pycache__, venv, node_modules, .git              │
-│                                                                 │
-│  2. PARSE EACH FILE                                             │
-│     └─→ Read source code                                        │
-│     └─→ Parse with Python AST                                   │
-│     └─→ Extract: Classes, Functions, Variables, Imports         │
-│     └─→ Track: function calls, class usages                     │
-│                                                                 │
-│  3. RESOLVE CROSS-REFERENCES                                    │
-│     └─→ Match function calls to definitions                     │
-│     └─→ Resolve class inheritance                               │
-│     └─→ Link file imports                                       │
-│                                                                 │
-│  4. DATABASE SETUP                                              │
-│     └─→ Connect to Neo4j                                        │
-│     └─→ Create constraints (unique IDs)                         │
-│     └─→ Create indexes (names, docstrings)                      │
-│                                                                 │
-│  5. BATCH INSERT                                                │
-│     └─→ UNWIND + MERGE all nodes                                │
-│     └─→ MATCH + MERGE all relationships                         │
-│                                                                 │
-│  6. COMPLETE                                                    │
-│     └─→ Report statistics                                       │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+1. DISCOVERY
+   - Walk directory tree
+   - Find all supported source files (.py, .ts, .java, .go, .rs, .c, .cpp, etc.)
+   - Skip __pycache__, venv, node_modules, .git, build dirs
+
+2. PARSE EACH FILE
+   - Route to the correct language parser via the registry
+   - Python: stdlib ast module
+   - All others: tree-sitter grammars
+   - Extract: Classes, Functions, Variables, Imports, Interfaces
+   - Track: function calls, class usages, method receivers
+
+3. RESOLVE CROSS-REFERENCES
+   - Match function calls to definitions
+   - Resolve class inheritance and trait implementations
+   - Link file imports
+
+4. DATABASE SETUP
+   - Connect to Neo4j
+   - Create constraints (unique IDs)
+   - Create indexes (names, docstrings)
+
+5. BATCH INSERT
+   - UNWIND + MERGE all nodes
+   - MATCH + MERGE all relationships
+
+6. COMPLETE
+   - Report statistics
 ```
 
 See [docs/INDEXING_FLOW.md](docs/INDEXING_FLOW.md) for detailed sequence diagram.
 
-## 🔧 Available MCP Tools (13)
+## Git Hooks (Automatic Re-indexing)
+
+Code-KAG can install git hooks to automatically keep the knowledge graph in sync with your codebase.
+
+### Install Hooks
+
+```bash
+# Install hooks with incremental mode (default)
+python cli.py hooks install /path/to/repo --id my-project --mode incremental
+
+# Install hooks with full re-index mode
+python cli.py hooks install /path/to/repo --id my-project --mode full
+```
+
+### Uninstall Hooks
+
+```bash
+python cli.py hooks uninstall /path/to/repo
+```
+
+### What the Hooks Do
+
+| Hook | Trigger | Action |
+|------|---------|--------|
+| `post-commit` | After each commit | Incremental re-index of changed files |
+| `post-merge` | After `git pull`/merge | Incremental re-index of changed files |
+| `post-checkout` | Branch switch | Full re-index |
+| `post-rewrite` | After rebase/amend | Full re-index |
+
+Hooks include lockfile-based debouncing to prevent concurrent re-index runs. Existing hooks are preserved by backing them up to `*.pre-code-kag` and chaining them.
+
+## Available MCP Tools (13)
 
 All query tools accept an optional `repo_id` parameter to scope results to a single repository. Omit it to search across all indexed repos.
 
 ### index_repository
-Index a repository into the knowledge graph. Parses all Python files and creates nodes/relationships in Neo4j.
+Index a repository into the knowledge graph. Parses all supported source files and creates nodes/relationships in Neo4j.
 ```
 "Index the project at /repos/my-app with ID my-app"
 ```
@@ -231,37 +269,77 @@ Check the health of the Code-KAG system (Neo4j connectivity, node counts, uptime
 "Is the code-kag system healthy?"
 ```
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 code-kag/
 ├── src/
 │   ├── __init__.py
-│   ├── models.py          # Data models for code entities
-│   ├── parser.py          # Python AST parser
-│   ├── languages.py       # Language parser registry (Python, TS, Java, etc.)
-│   ├── neo4j_ingester.py  # Neo4j ingestion and queries
-│   └── mcp_server.py      # MCP server implementation
+│   ├── models.py              # Data models (Class, Function, Interface, etc.)
+│   ├── parser.py              # CodebaseParser — file discovery & orchestration
+│   ├── languages.py           # Language parser registry & routing
+│   ├── parsers/
+│   │   ├── __init__.py
+│   │   ├── tree_sitter_base.py    # Shared base class for tree-sitter parsers
+│   │   ├── typescript_parser.py   # TypeScript/JavaScript (.ts, .tsx, .js, .jsx)
+│   │   ├── java_parser.py         # Java (.java)
+│   │   ├── go_parser.py           # Go (.go)
+│   │   ├── rust_parser.py         # Rust (.rs)
+│   │   └── cpp_parser.py          # C/C++ (.c, .cpp, .cc, .h, .hpp, etc.)
+│   ├── hooks/
+│   │   ├── __init__.py
+│   │   ├── hook_manager.py        # Install/uninstall git hooks
+│   │   └── templates/             # Shell hook templates
+│   │       ├── common.sh
+│   │       ├── post-commit.sh
+│   │       ├── post-merge.sh
+│   │       ├── post-checkout.sh
+│   │       └── post-rewrite.sh
+│   ├── neo4j_ingester.py     # Neo4j ingestion (full & incremental) and queries
+│   └── mcp_server.py         # MCP server implementation
+├── tests/
+│   ├── conftest.py            # Shared fixtures & sample code for all languages
+│   ├── test_models.py
+│   ├── test_python_parser.py
+│   ├── test_typescript_parser.py
+│   ├── test_java_parser.py
+│   ├── test_go_parser.py
+│   ├── test_rust_parser.py
+│   ├── test_cpp_parser.py
+│   ├── test_language_registry.py
+│   ├── test_codebase_parser.py
+│   ├── test_hooks.py
+│   ├── test_cli.py
+│   └── test_neo4j_ingester.py
 ├── config/
 │   └── mcp_config.example.json
-├── scripts/               # Utility scripts
-├── docs/                  # Documentation
-│   └── INDEXING_FLOW.md   # Detailed indexing sequence diagram
-├── cli.py                 # Command-line interface
-├── Dockerfile             # Container image definition
-├── docker-compose.yml     # Neo4j + MCP server orchestration
-├── healthcheck.py         # Docker health check script
-├── start.sh               # Convenience script for Docker commands
+├── scripts/                   # Utility scripts
+├── docs/                      # Documentation
+│   └── INDEXING_FLOW.md
+├── cli.py                     # CLI — index, hooks install/uninstall
+├── Dockerfile
+├── docker-compose.yml
+├── healthcheck.py
+├── start.sh
 ├── requirements.txt
 ├── setup.py
 └── README.md
 ```
 
-## 🔍 CLI Commands
+## CLI Commands
 
 ```bash
-# Index a repository
+# Full index of a repository (all supported languages)
 python cli.py index /path/to/repo --id project-name
+
+# Incremental index (only re-parse specific files)
+python cli.py index /path/to/repo --id project-name --incremental --changed-files src/main.py src/util.ts
+
+# Install git hooks for automatic re-indexing
+python cli.py hooks install /path/to/repo --id project-name --mode incremental
+
+# Uninstall git hooks
+python cli.py hooks uninstall /path/to/repo
 
 # Search code (all repos)
 python cli.py search "authentication"
@@ -275,34 +353,15 @@ python cli.py function my_function_name --repo-id my-project
 
 # Get call graph
 python cli.py callgraph "file.py:MyClass:method" --depth 3
-python cli.py callgraph "file.py:MyClass:method" --depth 3 --repo-id my-project
 
 # Start MCP server manually
 python cli.py serve
 
-# Show statistics (lists all repos and their IDs)
+# Show statistics
 python cli.py stats
 ```
 
-The `--repo-id` flag is available on `search`, `function`, and `callgraph` commands. When omitted, queries run across all indexed repositories.
-
-## 🛠️ Extending for Other Languages
-
-Currently supports Python. To add other languages:
-
-1. Create a new parser in `src/parsers/` (e.g., `typescript_parser.py`)
-2. Implement the same entity extraction as `PythonParser`
-3. Register the parser in `CodebaseParser` based on file extension
-
-Example structure for TypeScript parser:
-```python
-class TypeScriptParser:
-    def parse(self, source_code: str, file_path: str) -> ParseResult:
-        # Use tree-sitter or TypeScript compiler API
-        pass
-```
-
-## 🔐 Environment Variables
+## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -310,14 +369,19 @@ class TypeScriptParser:
 | `NEO4J_USERNAME` | `neo4j` | Neo4j username |
 | `NEO4J_PASSWORD` | `password` | Neo4j password |
 
-## 🧪 Development
+## Development
 
 ```bash
-# Install dev dependencies
-pip install -e ".[dev]"
+# Create a virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
 
-# Run tests
-pytest
+# Install dependencies
+pip install -r requirements.txt
+pip install pytest
+
+# Run tests (206 tests)
+pytest tests/ -v
 
 # Format code
 black .
@@ -326,7 +390,7 @@ black .
 mypy src/
 ```
 
-## 📈 Example Queries
+## Example Queries
 
 Once indexed, you can query the graph directly in Neo4j Browser:
 
@@ -334,6 +398,11 @@ Once indexed, you can query the graph directly in Neo4j Browser:
 -- Find all functions that call a specific function
 MATCH (caller:Function)-[:CALLS]->(f:Function {name: 'validate_input'})
 RETURN caller.name, caller.signature
+
+-- Find Go structs vs Python classes
+MATCH (c:Class)
+RETURN c.languageType, count(*) AS count
+ORDER BY count DESC
 
 -- Find classes with many methods
 MATCH (c:Class)-[:HAS_METHOD]->(m:Function)
@@ -351,22 +420,27 @@ MATCH (f:Function)
 WHERE NOT ()-[:CALLS]->(f)
 AND NOT f.name STARTS WITH '_'
 RETURN f.name, f.id
+
+-- Find all trait/interface implementations
+MATCH (c:Class)-[:IMPLEMENTS]->(i)
+RETURN c.name, c.languageType, i AS implements
 ```
 
-## 🤝 Contributing
+## Contributing
 
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
-4. Run tests
+4. Run tests (`pytest tests/ -v`)
 5. Submit a pull request
 
-## 📄 License
+## License
 
 MIT License - see LICENSE file for details.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - [Neo4j](https://neo4j.com/) for the graph database
 - [MCP](https://modelcontextprotocol.io/) for the AI integration protocol
-- [Python AST](https://docs.python.org/3/library/ast.html) for code parsing
+- [Python AST](https://docs.python.org/3/library/ast.html) for Python code parsing
+- [tree-sitter](https://tree-sitter.github.io/) for multi-language parsing

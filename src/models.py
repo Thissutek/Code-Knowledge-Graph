@@ -78,13 +78,15 @@ class Class(CodeEntity):
     decorators: List[str] = field(default_factory=list)
     base_classes: List[str] = field(default_factory=list)
     interfaces: List[str] = field(default_factory=list)
-    
+    language_type: str = "class"  # "class", "struct", "enum", "trait", "interface"
+
     def to_dict(self) -> Dict[str, Any]:
         d = super().to_dict()
         d['startLine'] = self.start_line
         d['endLine'] = self.end_line
         d['isAbstract'] = self.is_abstract
         d['decorators'] = self.decorators
+        d['languageType'] = self.language_type
         return d
 
 

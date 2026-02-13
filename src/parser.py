@@ -8,45 +8,45 @@ import hashlib
 from pathlib import Path
 from typing import List, Dict, Set, Optional, Tuple
 from .models import (
-    ParsedCodebase, Repository, File, Module, Class, Function, 
+    ParsedCodebase, Repository, File, Module, Class, Function,
     Variable, Import, Parameter, Relationship
 )
 
 
 class PythonParser(ast.NodeVisitor):
     """AST visitor that extracts code structure from Python files"""
-    
+
     def __init__(self, file_path: str, repo_id: str, source_code: str):
         self.file_path = file_path
         self.repo_id = repo_id
         self.source_code = source_code
         self.lines = source_code.split('\n')
-        
+
         # Current context
         self.current_class: Optional[str] = None
         self.current_function: Optional[str] = None
-        
+
         # Extracted entities
         self.classes: List[Class] = []
         self.functions: List[Function] = []
         self.variables: List[Variable] = []
         self.imports: List[Import] = []
-        
+
         # Relationships
         self.relationships: List[Relationship] = []
-        
+
         # Tracking for call resolution
         self.function_calls: Dict[str, List[Tuple[str, int]]] = {}  # function_id -> [(called_name, line)]
         self.class_usages: Dict[str, Set[str]] = {}  # function_id -> set of class names used
-        
+
     def _make_id(self, *parts) -> str:
         """Create a unique ID from parts"""
         return ':'.join(filter(None, [self.file_path] + list(parts)))
-    
+
     def _get_docstring(self, node) -> str:
         """Extract docstring from a node"""
         return ast.get_docstring(node) or ""
-    
+
     def _get_decorators(self, node) -> List[str]:
         """Extract decorator names from a node"""
         decorators = []
@@ -61,7 +61,7 @@ class PythonParser(ast.NodeVisitor):
             elif isinstance(dec, ast.Attribute):
                 decorators.append(dec.attr)
         return decorators
-    
+
     def _get_type_annotation(self, annotation) -> Optional[str]:
         """Convert type annotation AST to string"""
         if annotation is None:
@@ -70,7 +70,7 @@ class PythonParser(ast.NodeVisitor):
             return ast.unparse(annotation)
         except:
             return str(annotation)
-    
+
     def _calculate_complexity(self, node) -> int:
         """Calculate cyclomatic complexity of a function"""
         complexity = 1
@@ -82,7 +82,7 @@ class PythonParser(ast.NodeVisitor):
             elif isinstance(child, (ast.Assert, ast.comprehension)):
                 complexity += 1
         return complexity
-    
+
     def _get_base_classes(self, node: ast.ClassDef) -> List[str]:
         """Extract base class names"""
         bases = []
@@ -92,7 +92,7 @@ class PythonParser(ast.NodeVisitor):
             elif isinstance(base, ast.Attribute):
                 bases.append(f"{ast.unparse(base)}")
         return bases
-    
+
     def visit_Import(self, node: ast.Import):
         """Handle import statements"""
         for alias in node.names:
@@ -105,7 +105,7 @@ class PythonParser(ast.NodeVisitor):
             )
             self.imports.append(imp)
         self.generic_visit(node)
-    
+
     def visit_ImportFrom(self, node: ast.ImportFrom):
         """Handle from ... import statements"""
         module = node.module or ''
@@ -120,11 +120,11 @@ class PythonParser(ast.NodeVisitor):
             )
             self.imports.append(imp)
         self.generic_visit(node)
-    
+
     def visit_ClassDef(self, node: ast.ClassDef):
         """Handle class definitions"""
         class_id = self._make_id(node.name)
-        
+
         # Check if abstract
         is_abstract = any(
             isinstance(base, ast.Attribute) and base.attr == 'ABC'
@@ -134,7 +134,7 @@ class PythonParser(ast.NodeVisitor):
             d in ['abstractmethod', 'abstractproperty']
             for d in self._get_decorators(node)
         )
-        
+
         cls = Class(
             id=class_id,
             name=node.name,
@@ -146,30 +146,30 @@ class PythonParser(ast.NodeVisitor):
             base_classes=self._get_base_classes(node)
         )
         self.classes.append(cls)
-        
+
         # Visit children with class context
         old_class = self.current_class
         self.current_class = class_id
         self.generic_visit(node)
         self.current_class = old_class
-    
+
     def visit_FunctionDef(self, node: ast.FunctionDef):
         """Handle function definitions"""
         self._process_function(node, is_async=False)
-    
+
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
         """Handle async function definitions"""
         self._process_function(node, is_async=True)
-    
+
     def _process_function(self, node, is_async: bool):
         """Process a function or method definition"""
         is_method = self.current_class is not None
-        
+
         if is_method:
             func_id = self._make_id(self.current_class.split(':')[-1], node.name)
         else:
             func_id = self._make_id(node.name)
-        
+
         # Extract parameters
         parameters = []
         for arg in node.args.args:
@@ -178,7 +178,7 @@ class PythonParser(ast.NodeVisitor):
                 type_annotation=self._get_type_annotation(arg.annotation)
             )
             parameters.append(param)
-        
+
         # Handle default values
         defaults = node.args.defaults
         if defaults:
@@ -188,14 +188,14 @@ class PythonParser(ast.NodeVisitor):
                     parameters[offset + i].default_value = ast.unparse(default)
                 except:
                     pass
-        
+
         # Determine visibility
         visibility = "public"
         if node.name.startswith('__') and not node.name.endswith('__'):
             visibility = "private"
         elif node.name.startswith('_'):
             visibility = "protected"
-        
+
         # Build signature
         sig_parts = []
         for p in parameters:
@@ -205,15 +205,15 @@ class PythonParser(ast.NodeVisitor):
             if p.default_value:
                 part += f" = {p.default_value}"
             sig_parts.append(part)
-        
+
         return_type = self._get_type_annotation(node.returns)
         signature = f"({', '.join(sig_parts)})"
         if return_type:
             signature += f" -> {return_type}"
-        
+
         decorators = self._get_decorators(node)
         is_static = 'staticmethod' in decorators
-        
+
         func = Function(
             id=func_id,
             name=node.name,
@@ -230,7 +230,7 @@ class PythonParser(ast.NodeVisitor):
             visibility=visibility
         )
         self.functions.append(func)
-        
+
         # Add method relationship if in class
         if is_method:
             self.relationships.append(Relationship(
@@ -239,17 +239,17 @@ class PythonParser(ast.NodeVisitor):
                 target_id=func_id,
                 properties={'visibility': visibility}
             ))
-        
+
         # Track function calls within this function
         self.function_calls[func_id] = []
         self.class_usages[func_id] = set()
-        
+
         # Visit children with function context
         old_func = self.current_function
         self.current_function = func_id
         self.generic_visit(node)
         self.current_function = old_func
-    
+
     def visit_Call(self, node: ast.Call):
         """Track function calls"""
         if self.current_function:
@@ -258,19 +258,19 @@ class PythonParser(ast.NodeVisitor):
                 called_name = node.func.id
             elif isinstance(node.func, ast.Attribute):
                 called_name = node.func.attr
-            
+
             if called_name:
                 self.function_calls[self.current_function].append(
                     (called_name, node.lineno)
                 )
         self.generic_visit(node)
-    
+
     def visit_Name(self, node: ast.Name):
         """Track class usages (instantiation, type hints, etc.)"""
         if self.current_function and node.id[0].isupper():
             self.class_usages[self.current_function].add(node.id)
         self.generic_visit(node)
-    
+
     def visit_Assign(self, node: ast.Assign):
         """Handle variable assignments at module/class level"""
         if self.current_function is None:  # Only module/class level
@@ -279,10 +279,10 @@ class PythonParser(ast.NodeVisitor):
                     var_id = self._make_id(target.id)
                     if self.current_class:
                         var_id = self._make_id(self.current_class.split(':')[-1], target.id)
-                    
+
                     # Check if it's a constant (ALL_CAPS)
                     is_constant = target.id.isupper()
-                    
+
                     var = Variable(
                         id=var_id,
                         name=target.id,
@@ -290,7 +290,7 @@ class PythonParser(ast.NodeVisitor):
                         is_constant=is_constant
                     )
                     self.variables.append(var)
-                    
+
                     if self.current_class:
                         self.relationships.append(Relationship(
                             rel_type='HAS_VARIABLE',
@@ -298,14 +298,14 @@ class PythonParser(ast.NodeVisitor):
                             target_id=var_id
                         ))
         self.generic_visit(node)
-    
+
     def visit_AnnAssign(self, node: ast.AnnAssign):
         """Handle annotated assignments"""
         if self.current_function is None and isinstance(node.target, ast.Name):
             var_id = self._make_id(node.target.id)
             if self.current_class:
                 var_id = self._make_id(self.current_class.split(':')[-1], node.target.id)
-            
+
             var = Variable(
                 id=var_id,
                 name=node.target.id,
@@ -314,7 +314,7 @@ class PythonParser(ast.NodeVisitor):
                 is_constant=node.target.id.isupper()
             )
             self.variables.append(var)
-            
+
             if self.current_class:
                 self.relationships.append(Relationship(
                     rel_type='HAS_VARIABLE',
@@ -326,85 +326,114 @@ class PythonParser(ast.NodeVisitor):
 
 class CodebaseParser:
     """Main parser for analyzing entire codebases"""
-    
-    PYTHON_EXTENSIONS = {'.py', '.pyw'}
+
     IGNORE_DIRS = {'.git', '.svn', '__pycache__', 'node_modules', 'venv', '.venv', 'env', '.env', 'dist', 'build'}
-    
+
     def __init__(self, repo_path: str, repo_id: Optional[str] = None):
         self.repo_path = Path(repo_path).resolve()
         self.repo_id = repo_id or self.repo_path.name
-        
+
     def parse(self) -> ParsedCodebase:
         """Parse the entire codebase"""
+        from .languages import get_all_supported_extensions
+
         # Create repository entity
         repo = Repository(
             id=self.repo_id,
             name=self.repo_path.name,
             path=str(self.repo_path),
-            language='Python'
+            language='multi'
         )
-        
+
         codebase = ParsedCodebase(repository=repo)
-        
-        # Find all Python files
-        python_files = self._find_python_files()
-        
+
+        # Find all supported source files
+        source_files = self._find_source_files(get_all_supported_extensions())
+
         # Parse each file
-        for file_path in python_files:
+        for file_path in source_files:
             self._parse_file(file_path, codebase)
-        
+
         # Resolve cross-references and build additional relationships
         self._resolve_relationships(codebase)
-        
+
         return codebase
-    
-    def _find_python_files(self) -> List[Path]:
-        """Find all Python files in the repository"""
-        python_files = []
-        
+
+    def parse_incremental(self, changed_files: List[str]) -> ParsedCodebase:
+        """Parse only the specified changed files."""
+        from .languages import get_all_supported_extensions
+
+        repo = Repository(
+            id=self.repo_id,
+            name=self.repo_path.name,
+            path=str(self.repo_path),
+            language='multi'
+        )
+
+        codebase = ParsedCodebase(repository=repo)
+        supported = get_all_supported_extensions()
+
+        for rel_path in changed_files:
+            file_path = self.repo_path / rel_path
+            if file_path.exists() and file_path.suffix.lower() in supported:
+                self._parse_file(file_path, codebase)
+
+        self._resolve_relationships(codebase)
+        return codebase
+
+    def _find_source_files(self, extensions: Set[str]) -> List[Path]:
+        """Find all source files in the repository matching supported extensions."""
+        source_files = []
+
         for root, dirs, files in os.walk(self.repo_path):
             # Filter out ignored directories
             dirs[:] = [d for d in dirs if d not in self.IGNORE_DIRS]
-            
+
             for file in files:
                 file_path = Path(root) / file
-                if file_path.suffix in self.PYTHON_EXTENSIONS:
-                    python_files.append(file_path)
-        
-        return python_files
-    
+                if file_path.suffix.lower() in extensions:
+                    source_files.append(file_path)
+
+        return source_files
+
     def _parse_file(self, file_path: Path, codebase: ParsedCodebase):
-        """Parse a single Python file"""
+        """Parse a single source file using the appropriate language parser."""
+        from .languages import get_parser_for_file
+
         try:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 source_code = f.read()
         except Exception as e:
             print(f"Error reading {file_path}: {e}")
             return
-        
+
         # Create file entity
         rel_path = file_path.relative_to(self.repo_path)
         file_id = str(rel_path)
-        
+
+        # Determine language name from parser
+        parser = get_parser_for_file(file_path)
+        language = parser.config.name if parser else "Unknown"
+
         file_entity = File(
             id=file_id,
             name=file_path.name,
             path=str(rel_path),
             extension=file_path.suffix,
-            language='Python',
+            language=language,
             lines_of_code=len(source_code.split('\n')),
             content_hash=hashlib.md5(source_code.encode()).hexdigest()
         )
         codebase.files.append(file_entity)
-        
+
         # Add file -> repository relationship
         codebase.add_relationship('CONTAINS_FILE', self.repo_id, file_id)
-        
+
         # Determine module
         module_path = rel_path.parent
         if module_path != Path('.'):
             module_id = str(module_path).replace('/', '.').replace('\\', '.')
-            
+
             # Check if module already exists
             if not any(m.id == module_id for m in codebase.modules):
                 module = Module(
@@ -415,66 +444,73 @@ class CodebaseParser:
                 )
                 codebase.modules.append(module)
                 codebase.add_relationship('CONTAINS_MODULE', self.repo_id, module_id)
-            
+
             codebase.add_relationship('BELONGS_TO_MODULE', file_id, module_id)
-        
-        # Parse AST
-        try:
-            tree = ast.parse(source_code, filename=str(file_path))
-        except SyntaxError as e:
-            print(f"Syntax error in {file_path}: {e}")
+
+        # Use language-specific parser
+        if parser is None:
+            print(f"No parser available for {file_path}")
             return
-        
-        # Visit AST
-        parser = PythonParser(file_id, self.repo_id, source_code)
-        parser.visit(tree)
-        
+
+        result = parser.parse_file(file_path, source_code)
+
         # Add parsed entities
-        codebase.classes.extend(parser.classes)
-        codebase.functions.extend(parser.functions)
-        codebase.variables.extend(parser.variables)
-        codebase.imports.extend(parser.imports)
-        codebase.relationships.extend(parser.relationships)
-        
+        codebase.classes.extend(result.get('classes', []))
+        codebase.functions.extend(result.get('functions', []))
+        codebase.variables.extend(result.get('variables', []))
+        codebase.imports.extend(result.get('imports', []))
+        codebase.interfaces.extend(result.get('interfaces', []))
+        codebase.relationships.extend(result.get('relationships', []))
+
         # Add file -> class relationships
-        for cls in parser.classes:
+        for cls in result.get('classes', []):
             codebase.add_relationship('DEFINES_CLASS', file_id, cls.id)
-        
+
         # Add file -> function relationships (only top-level functions)
-        for func in parser.functions:
+        for func in result.get('functions', []):
             if not func.is_method:
                 codebase.add_relationship('DEFINES_FUNCTION', file_id, func.id)
-        
+
         # Add file -> import relationships
-        for imp in parser.imports:
+        for imp in result.get('imports', []):
             codebase.add_relationship('IMPORTS', file_id, imp.id)
-        
-        # Store call information for later resolution
-        file_entity._function_calls = parser.function_calls
-        file_entity._class_usages = parser.class_usages
-    
+
+        # Store call information for later resolution (Python parser only)
+        if hasattr(parser, 'parse_file'):
+            # Check if we got function_calls tracking from PythonParser
+            from .languages import PythonLanguageParser
+            if isinstance(parser, PythonLanguageParser):
+                # Re-parse to get call tracking (PythonParser stores this)
+                py_parser = PythonParser(file_id, self.repo_id, source_code)
+                try:
+                    tree = ast.parse(source_code, filename=str(file_path))
+                    py_parser.visit(tree)
+                    file_entity._function_calls = py_parser.function_calls
+                    file_entity._class_usages = py_parser.class_usages
+                except SyntaxError:
+                    pass
+
     def _resolve_relationships(self, codebase: ParsedCodebase):
         """Resolve cross-file relationships"""
         # Build lookup tables
         class_by_name: Dict[str, Class] = {}
         func_by_name: Dict[str, List[Function]] = {}
-        file_by_module: Dict[str, str] = {}
-        
+
         for cls in codebase.classes:
             class_by_name[cls.name] = cls
-        
+
         for func in codebase.functions:
             if func.name not in func_by_name:
                 func_by_name[func.name] = []
             func_by_name[func.name].append(func)
-        
+
         # Resolve class inheritance
         for cls in codebase.classes:
             for base_name in cls.base_classes:
                 if base_name in class_by_name:
                     base_cls = class_by_name[base_name]
                     codebase.add_relationship('EXTENDS', cls.id, base_cls.id)
-        
+
         # Resolve function calls and class usages
         for file_entity in codebase.files:
             if hasattr(file_entity, '_function_calls'):
@@ -488,7 +524,7 @@ class CodebaseParser:
                                     lineNumbers=str([line])
                                 )
                                 break
-            
+
             if hasattr(file_entity, '_class_usages'):
                 for func_id, class_names in file_entity._class_usages.items():
                     for class_name in class_names:
@@ -496,7 +532,7 @@ class CodebaseParser:
                             codebase.add_relationship(
                                 'USES_CLASS', func_id, class_by_name[class_name].id
                             )
-        
+
         # Resolve import dependencies between files
         import_to_file: Dict[str, str] = {}
         for file_entity in codebase.files:
@@ -505,7 +541,7 @@ class CodebaseParser:
             import_to_file[module_name] = file_entity.id
             # Also add just the filename without path
             import_to_file[file_entity.name.replace('.py', '')] = file_entity.id
-        
+
         for file_entity in codebase.files:
             for imp in codebase.imports:
                 if imp.id.startswith(file_entity.id):

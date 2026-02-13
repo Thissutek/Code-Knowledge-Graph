@@ -116,7 +116,44 @@ class Neo4jIngester:
         
         stats = codebase.get_stats()
         print(f"Ingestion complete: {stats}")
-    
+
+    def ingest_incremental(self, codebase: ParsedCodebase, changed_files: List[str]):
+        """Incrementally ingest only changed files.
+
+        Deletes old nodes for the changed files and inserts the new parsed data.
+        """
+        repo_id = codebase.repository.id
+
+        with self.driver.session() as session:
+            # Delete existing entities for each changed file
+            for rel_path in changed_files:
+                self._clear_file_entities(session, repo_id, rel_path)
+
+            # Ingest the new data (repository MERGE is idempotent)
+            self._ingest_repository(session, codebase)
+            self._ingest_files(session, codebase)
+            self._ingest_modules(session, codebase)
+            self._ingest_classes(session, codebase)
+            self._ingest_functions(session, codebase)
+            self._ingest_variables(session, codebase)
+            self._ingest_imports(session, codebase)
+            self._ingest_relationships(session, codebase)
+
+        stats = codebase.get_stats()
+        print(f"Incremental ingestion complete for {len(changed_files)} file(s): {stats}")
+
+    def _clear_file_entities(self, session, repo_id: str, file_path: str):
+        """Delete all entities associated with a specific file."""
+        session.run("""
+            MATCH (f:File {id: $file_path})
+            OPTIONAL MATCH (f)-[:DEFINES_CLASS]->(c:Class)
+            OPTIONAL MATCH (c)-[:HAS_METHOD]->(cm:Function)
+            OPTIONAL MATCH (c)-[:HAS_VARIABLE]->(cv:Variable)
+            OPTIONAL MATCH (f)-[:DEFINES_FUNCTION]->(fn:Function)
+            OPTIONAL MATCH (f)-[:IMPORTS]->(imp:Import)
+            DETACH DELETE cm, cv, fn, imp, c, f
+        """, file_path=file_path)
+
     def _ingest_repository(self, session, codebase: ParsedCodebase):
         """Ingest repository node"""
         repo = codebase.repository
@@ -164,7 +201,7 @@ class Neo4jIngester:
         """Ingest class nodes in batch"""
         if not codebase.classes:
             return
-        
+
         records = [c.to_dict() for c in codebase.classes]
         session.run("""
             UNWIND $records AS record
@@ -174,7 +211,8 @@ class Neo4jIngester:
                 c.startLine = record.startLine,
                 c.endLine = record.endLine,
                 c.isAbstract = record.isAbstract,
-                c.decorators = record.decorators
+                c.decorators = record.decorators,
+                c.languageType = record.languageType
         """, records=records)
     
     def _ingest_functions(self, session, codebase: ParsedCodebase):
@@ -690,25 +728,38 @@ class CodeKAGQuerier:
 
         return results[:limit]
 
-def ingest_repository(repo_path: str, repo_id: str = None, neo4j_uri: str = None, 
-                      neo4j_user: str = None, neo4j_password: str = None) -> Dict:
+def ingest_repository(repo_path: str, repo_id: str = None, neo4j_uri: str = None,
+                      neo4j_user: str = None, neo4j_password: str = None,
+                      incremental: bool = False,
+                      changed_files: Optional[List[str]] = None) -> Dict:
     """
     Convenience function to parse and ingest a repository.
     Returns statistics about the ingestion.
+
+    If incremental=True and changed_files is provided, only those files are
+    re-parsed and re-ingested.
     """
-    from .parser import parse_repository
-    
-    # Parse the repository
-    print(f"Parsing repository: {repo_path}")
-    codebase = parse_repository(repo_path, repo_id)
-    
+    from .parser import CodebaseParser
+
+    parser = CodebaseParser(repo_path, repo_id)
+
+    if incremental and changed_files:
+        print(f"Incremental indexing: {len(changed_files)} changed file(s)")
+        codebase = parser.parse_incremental(changed_files)
+    else:
+        print(f"Parsing repository: {repo_path}")
+        codebase = parser.parse()
+
     # Ingest into Neo4j
     ingester = Neo4jIngester(neo4j_uri, neo4j_user, neo4j_password)
     ingester.connect()
-    
+
     try:
         ingester.create_constraints()
-        ingester.ingest(codebase)
+        if incremental and changed_files:
+            ingester.ingest_incremental(codebase, changed_files)
+        else:
+            ingester.ingest(codebase)
         return codebase.get_stats()
     finally:
         ingester.close()

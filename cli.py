@@ -15,14 +15,20 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 def cmd_index(args):
     """Index a repository"""
     from src.neo4j_ingester import ingest_repository
-    
+
+    changed_files = None
+    if args.incremental and args.changed_files:
+        changed_files = args.changed_files
+
     print(f"Indexing repository: {args.path}")
     stats = ingest_repository(
         args.path,
         repo_id=args.id,
         neo4j_uri=args.neo4j_uri,
         neo4j_user=args.neo4j_user,
-        neo4j_password=args.neo4j_password
+        neo4j_password=args.neo4j_password,
+        incremental=args.incremental,
+        changed_files=changed_files,
     )
     print(f"Indexing complete!")
     print(f"Statistics: {json.dumps(stats, indent=2)}")
@@ -31,10 +37,10 @@ def cmd_index(args):
 def cmd_search(args):
     """Search the code knowledge graph"""
     from src.neo4j_ingester import CodeKAGQuerier
-    
+
     q = CodeKAGQuerier(args.neo4j_uri, args.neo4j_user, args.neo4j_password)
     q.connect()
-    
+
     try:
         results = q.semantic_code_search(args.query, args.limit, repo_id=args.repo_id)
         print(json.dumps(results, indent=2))
@@ -45,10 +51,10 @@ def cmd_search(args):
 def cmd_function(args):
     """Get function details"""
     from src.neo4j_ingester import CodeKAGQuerier
-    
+
     q = CodeKAGQuerier(args.neo4j_uri, args.neo4j_user, args.neo4j_password)
     q.connect()
-    
+
     try:
         results = q.find_function_by_name(args.name, repo_id=args.repo_id)
         if results:
@@ -62,10 +68,10 @@ def cmd_function(args):
 def cmd_callgraph(args):
     """Get function call graph"""
     from src.neo4j_ingester import CodeKAGQuerier
-    
+
     q = CodeKAGQuerier(args.neo4j_uri, args.neo4j_user, args.neo4j_password)
     q.connect()
-    
+
     try:
         result = q.get_function_callgraph(args.function_id, args.depth, repo_id=args.repo_id)
         print(json.dumps(result, indent=2))
@@ -77,7 +83,7 @@ def cmd_serve(args):
     """Start the MCP server"""
     import asyncio
     from src.mcp_server import main
-    
+
     # Set environment variables
     if args.neo4j_uri:
         os.environ['NEO4J_URI'] = args.neo4j_uri
@@ -85,7 +91,7 @@ def cmd_serve(args):
         os.environ['NEO4J_USERNAME'] = args.neo4j_user
     if args.neo4j_password:
         os.environ['NEO4J_PASSWORD'] = args.neo4j_password
-    
+
     print("Starting Code-KAG MCP Server...", file=sys.stderr)
     asyncio.run(main())
 
@@ -93,10 +99,10 @@ def cmd_serve(args):
 def cmd_stats(args):
     """Show statistics about indexed repositories"""
     from src.neo4j_ingester import CodeKAGQuerier
-    
+
     q = CodeKAGQuerier(args.neo4j_uri, args.neo4j_user, args.neo4j_password)
     q.connect()
-    
+
     try:
         with q.driver.session() as session:
             result = session.run("""
@@ -113,7 +119,7 @@ def cmd_stats(args):
                 RETURN r.id AS repo, r.name AS name, r.path AS path,
                        files, modules, classes, topLevelFuncs + count(DISTINCT m2) AS functions
             """)
-            
+
             for record in result:
                 print(f"\nRepository: {record['name']}")
                 print(f"  Path: {record['path']}")
@@ -125,6 +131,27 @@ def cmd_stats(args):
         q.close()
 
 
+def cmd_hooks_install(args):
+    """Install code-kag git hooks into a repository"""
+    from src.hooks import HookManager
+
+    manager = HookManager()
+    manager.install(
+        repo_path=args.repo_path,
+        repo_id=args.id,
+        mode=args.mode,
+        neo4j_uri=args.neo4j_uri,
+    )
+
+
+def cmd_hooks_uninstall(args):
+    """Uninstall code-kag git hooks from a repository"""
+    from src.hooks import HookManager
+
+    manager = HookManager()
+    manager.uninstall(repo_path=args.repo_path)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Code Knowledge Graph CLI",
@@ -133,21 +160,30 @@ def main():
 Examples:
   # Index a repository
   python cli.py index /path/to/repo --id my-project
-  
+
+  # Incremental re-index
+  python cli.py index /path/to/repo --id my-project --incremental --changed-files src/main.py src/utils.py
+
   # Search for code
   python cli.py search "database connection"
-  
+
   # Get function details
   python cli.py function parse_config
-  
+
   # Start MCP server
   python cli.py serve
-  
+
   # Show statistics
   python cli.py stats
+
+  # Install git hooks
+  python cli.py hooks install /path/to/repo --id my-project --mode incremental
+
+  # Uninstall git hooks
+  python cli.py hooks uninstall /path/to/repo
 """
     )
-    
+
     # Global arguments
     parser.add_argument('--neo4j-uri', default=os.getenv('NEO4J_URI', 'bolt://localhost:7687'),
                         help='Neo4j connection URI')
@@ -155,49 +191,75 @@ Examples:
                         help='Neo4j username')
     parser.add_argument('--neo4j-password', default=os.getenv('NEO4J_PASSWORD', 'password'),
                         help='Neo4j password')
-    
+
     subparsers = parser.add_subparsers(dest='command', help='Commands')
-    
+
     # Index command
     index_parser = subparsers.add_parser('index', help='Index a repository')
     index_parser.add_argument('path', help='Path to the repository')
     index_parser.add_argument('--id', help='Repository ID (default: directory name)')
+    index_parser.add_argument('--incremental', action='store_true',
+                              help='Only re-index changed files')
+    index_parser.add_argument('--changed-files', nargs='+', metavar='FILE',
+                              help='List of changed files (relative paths) for incremental indexing')
     index_parser.set_defaults(func=cmd_index)
-    
+
     # Search command
     search_parser = subparsers.add_parser('search', help='Search code')
     search_parser.add_argument('query', help='Search query')
     search_parser.add_argument('--limit', type=int, default=10, help='Max results')
     search_parser.add_argument('--repo-id', default=None, help='Scope results to a specific repository')
     search_parser.set_defaults(func=cmd_search)
-    
+
     # Function command
     func_parser = subparsers.add_parser('function', help='Get function details')
     func_parser.add_argument('name', help='Function name')
     func_parser.add_argument('--repo-id', default=None, help='Scope results to a specific repository')
     func_parser.set_defaults(func=cmd_function)
-    
+
     # Call graph command
     cg_parser = subparsers.add_parser('callgraph', help='Get call graph')
     cg_parser.add_argument('function_id', help='Function ID')
     cg_parser.add_argument('--depth', type=int, default=2, help='Traversal depth')
     cg_parser.add_argument('--repo-id', default=None, help='Scope results to a specific repository')
     cg_parser.set_defaults(func=cmd_callgraph)
-    
+
     # Serve command
     serve_parser = subparsers.add_parser('serve', help='Start MCP server')
     serve_parser.set_defaults(func=cmd_serve)
-    
+
     # Stats command
     stats_parser = subparsers.add_parser('stats', help='Show statistics')
     stats_parser.set_defaults(func=cmd_stats)
-    
+
+    # Hooks command group
+    hooks_parser = subparsers.add_parser('hooks', help='Manage git hooks')
+    hooks_sub = hooks_parser.add_subparsers(dest='hooks_command', help='Hook commands')
+
+    # hooks install
+    hooks_install = hooks_sub.add_parser('install', help='Install code-kag git hooks')
+    hooks_install.add_argument('repo_path', help='Path to the git repository')
+    hooks_install.add_argument('--id', help='Repository ID (default: directory name)')
+    hooks_install.add_argument('--mode', choices=['incremental', 'full'],
+                               default='incremental',
+                               help='Re-indexing mode (default: incremental)')
+    hooks_install.set_defaults(func=cmd_hooks_install)
+
+    # hooks uninstall
+    hooks_uninstall = hooks_sub.add_parser('uninstall', help='Uninstall code-kag git hooks')
+    hooks_uninstall.add_argument('repo_path', help='Path to the git repository')
+    hooks_uninstall.set_defaults(func=cmd_hooks_uninstall)
+
     args = parser.parse_args()
-    
+
     if args.command is None:
         parser.print_help()
         sys.exit(1)
-    
+
+    if args.command == 'hooks' and (not hasattr(args, 'hooks_command') or args.hooks_command is None):
+        hooks_parser.print_help()
+        sys.exit(1)
+
     args.func(args)
 
 

@@ -28,6 +28,13 @@ setup(
     install_requires=[
         "neo4j>=5.0.0",
         "mcp>=0.1.0",
+        "tree-sitter>=0.23.0",
+        "tree-sitter-typescript>=0.23.0",
+        "tree-sitter-java>=0.23.0",
+        "tree-sitter-go>=0.23.0",
+        "tree-sitter-rust>=0.23.0",
+        "tree-sitter-c>=0.23.0",
+        "tree-sitter-cpp>=0.23.0",
     ],
     extras_require={
         "dev": [
