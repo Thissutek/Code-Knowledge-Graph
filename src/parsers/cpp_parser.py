@@ -78,6 +78,7 @@ class CppLanguageParser(TreeSitterBaseParser):
             'functions': functions,
             'variables': variables,
             'imports': imports,
+            'interfaces': [],
             'relationships': relationships,
         }
 

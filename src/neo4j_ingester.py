@@ -150,9 +150,17 @@ class Neo4jIngester:
             OPTIONAL MATCH (c)-[:HAS_METHOD]->(cm:Function)
             OPTIONAL MATCH (c)-[:HAS_VARIABLE]->(cv:Variable)
             OPTIONAL MATCH (f)-[:DEFINES_FUNCTION]->(fn:Function)
+            OPTIONAL MATCH (f)-[:DEFINES_INTERFACE]->(iface:Interface)
             OPTIONAL MATCH (f)-[:IMPORTS]->(imp:Import)
-            DETACH DELETE cm, cv, fn, imp, c, f
+            DETACH DELETE cm, cv, fn, iface, imp, c, f
         """, file_path=file_path)
+        # Clean up file-level (global) variables whose ID starts with the file path
+        session.run("""
+            MATCH (v:Variable)
+            WHERE v.id STARTS WITH $file_prefix
+            AND NOT ()-[:HAS_VARIABLE]->(v)
+            DETACH DELETE v
+        """, file_prefix=file_path + ":")
 
     def _ingest_repository(self, session, codebase: ParsedCodebase):
         """Ingest repository node"""

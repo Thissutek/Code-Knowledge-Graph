@@ -3,6 +3,7 @@ Hook Manager
 Installs and uninstalls code-kag git hooks into target repositories.
 """
 import os
+import re
 import stat
 import shutil
 from pathlib import Path
@@ -10,6 +11,8 @@ from typing import Optional
 
 
 HOOK_NAMES = ['post-commit', 'post-merge', 'post-checkout', 'post-rewrite']
+# Pattern for safe shell variable values (alphanumeric, dash, underscore, dot, colon, slash)
+_SAFE_SHELL_VALUE = re.compile(r'^[a-zA-Z0-9._/:@\-]+$')
 TEMPLATES_DIR = Path(__file__).parent / 'templates'
 CODE_KAG_MARKER = '# code-kag-hook'
 
@@ -42,6 +45,16 @@ class HookManager:
         if repo_id is None:
             repo_id = repo.name
 
+        # Validate values against shell injection
+        for name, value in [('repo_id', repo_id), ('mode', mode),
+                            ('neo4j_uri', neo4j_uri),
+                            ('code_kag_path', self.code_kag_path)]:
+            if not _SAFE_SHELL_VALUE.match(value):
+                raise ValueError(
+                    f"Unsafe characters in {name}: {value!r}. "
+                    f"Only alphanumeric, dash, underscore, dot, colon, "
+                    f"slash, and @ are allowed.")
+
         # Install common.sh with placeholders filled in
         common_template = (TEMPLATES_DIR / 'common.sh').read_text()
         common_content = (
@@ -67,9 +80,26 @@ class HookManager:
             if hook_dest.exists():
                 existing = hook_dest.read_text()
                 if CODE_KAG_MARKER in existing:
-                    # Already installed, update it
-                    hook_dest.write_text(
-                        f'{CODE_KAG_MARKER}\n{hook_content}')
+                    # Already installed, update in place
+                    backup = hooks_dir / f'{hook_name}.pre-code-kag'
+                    if backup.exists():
+                        # Preserve the chaining wrapper
+                        wrapper = f"""#!/usr/bin/env bash
+{CODE_KAG_MARKER}
+# This hook chains the original hook with code-kag.
+
+# Run original hook first
+if [ -f "$(dirname "$0")/{hook_name}.pre-code-kag" ]; then
+    "$(dirname "$0")/{hook_name}.pre-code-kag" "$@"
+fi
+
+# Run code-kag hook
+{hook_content}
+"""
+                        hook_dest.write_text(wrapper)
+                    else:
+                        hook_dest.write_text(
+                            f'#!/usr/bin/env bash\n{CODE_KAG_MARKER}\n{hook_content}')
                     self._make_executable(hook_dest)
                     continue
 
