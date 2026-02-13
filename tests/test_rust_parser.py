@@ -123,6 +123,39 @@ class TestRustImports:
         assert "Read" in names
         assert "Write" in names
 
+    def test_nested_brace_import(self):
+        code = "use std::{io::{Read, Write}, fmt::Debug};\n"
+        r = _parse(code)
+        names = [i.name for i in r["imports"]]
+        assert "Read" in names
+        assert "Write" in names
+        assert "Debug" in names
+        sources = [i.source for i in r["imports"]]
+        assert "std::io::Read" in sources
+        assert "std::io::Write" in sources
+        assert "std::fmt::Debug" in sources
+
+    def test_deep_nested_braces(self):
+        code = "use a::{b::{c::{D, E}}, F};\n"
+        r = _parse(code)
+        names = [i.name for i in r["imports"]]
+        assert "D" in names
+        assert "E" in names
+        assert "F" in names
+
+    def test_self_import(self):
+        code = "use std::io::{self, Read};\n"
+        r = _parse(code)
+        names = [i.name for i in r["imports"]]
+        assert "io" in names
+        assert "Read" in names
+
+    def test_alias_import(self):
+        code = "use std::io::Read as StdRead;\n"
+        r = _parse(code)
+        names = [i.name for i in r["imports"]]
+        assert "StdRead" in names
+
 
 # ── Relationships ───────────────────────────────────────────────────────────
 
@@ -142,3 +175,24 @@ class TestRustRelationships:
         impl = [rel for rel in r["relationships"] if rel.rel_type == "IMPLEMENTS"]
         # CacheError implements Display
         assert any("Display" in rel.target_id for rel in impl)
+
+
+# ── Function calls ─────────────────────────────────────────────────────────
+
+class TestRustFunctionCalls:
+    def test_new_calls_extracted(self):
+        r = _parse(SAMPLE_RUST)
+        fc = r.get("function_calls", {})
+        # Cache::new calls HashMap::new → extracts "HashMap" (scoped call)
+        new_calls = {k: v for k, v in fc.items() if k.endswith(":new")}
+        assert len(new_calls) > 0
+        all_names = [name for calls in new_calls.values() for name, _ in calls]
+        assert "HashMap" in all_names
+
+    def test_set_calls_extracted(self):
+        r = _parse(SAMPLE_RUST)
+        fc = r.get("function_calls", {})
+        set_calls = {k: v for k, v in fc.items() if k.endswith(":set")}
+        assert len(set_calls) > 0
+        all_names = [name for calls in set_calls.values() for name, _ in calls]
+        assert "insert" in all_names

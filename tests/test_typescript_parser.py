@@ -152,6 +152,35 @@ class TestTypeScriptRelationships:
         assert any("Fetchable" in r.target_id for r in impl)
 
 
+# ── Function calls ─────────────────────────────────────────────────────────
+
+class TestTypeScriptFunctionCalls:
+    def test_method_calls_extracted(self):
+        r = _parse(SAMPLE_TYPESCRIPT)
+        fc = r.get("function_calls", {})
+        # fetch method calls axios.get → extracts "get"
+        fetch_calls = {k: v for k, v in fc.items() if ":fetch" in k}
+        assert len(fetch_calls) > 0
+        all_names = [name for calls in fetch_calls.values() for name, _ in calls]
+        assert "get" in all_names
+
+    def test_constructor_calls_super(self):
+        r = _parse(SAMPLE_TYPESCRIPT)
+        fc = r.get("function_calls", {})
+        ctor_calls = {k: v for k, v in fc.items() if ":constructor" in k}
+        assert len(ctor_calls) > 0
+        all_names = [name for calls in ctor_calls.values() for name, _ in calls]
+        assert "super" in all_names
+
+    def test_static_method_calls_new(self):
+        r = _parse(SAMPLE_TYPESCRIPT)
+        fc = r.get("function_calls", {})
+        create_calls = {k: v for k, v in fc.items() if ":create" in k}
+        assert len(create_calls) > 0
+        all_names = [name for calls in create_calls.values() for name, _ in calls]
+        assert "HttpClient" in all_names
+
+
 # ── TSX / JSX variant ──────────────────────────────────────────────────────
 
 class TestTSXParsing:

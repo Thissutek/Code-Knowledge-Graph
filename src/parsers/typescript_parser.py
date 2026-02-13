@@ -63,6 +63,8 @@ class TypeScriptLanguageParser(TreeSitterBaseParser):
         imports: List[Import] = []
         interfaces: List[Interface] = []
         relationships: List[Relationship] = []
+        self._current_function_calls: Dict[str, list] = {}
+        self._source_bytes = source_bytes
 
         self._walk(root, source_bytes, fp, classes, functions, variables,
                    imports, interfaces, relationships, current_class=None)
@@ -74,6 +76,7 @@ class TypeScriptLanguageParser(TreeSitterBaseParser):
             'imports': imports,
             'interfaces': interfaces,
             'relationships': relationships,
+            'function_calls': self._current_function_calls,
         }
 
     def _walk(self, node, source_bytes, fp, classes, functions, variables,
@@ -237,6 +240,12 @@ class TypeScriptLanguageParser(TreeSitterBaseParser):
             visibility=visibility,
         )
         functions.append(func)
+
+        # Extract function calls
+        calls = self._extract_function_calls(
+            node, source_bytes, ('call_expression', 'new_expression'))
+        if calls:
+            self._current_function_calls[func_id] = calls
 
         if is_method and current_class:
             relationships.append(Relationship(

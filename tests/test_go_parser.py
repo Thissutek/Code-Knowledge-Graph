@@ -132,3 +132,23 @@ class TestGoRelationships:
         target_names = [rel.target_id for rel in hm]
         assert any("Start" in t for t in target_names)
         assert any("Stop" in t for t in target_names)
+
+
+# ── Function calls ─────────────────────────────────────────────────────────
+
+class TestGoFunctionCalls:
+    def test_main_calls_extracted(self):
+        r = _parse(SAMPLE_GO)
+        fc = r.get("function_calls", {})
+        main_calls = {k: v for k, v in fc.items() if k.endswith(":main")}
+        assert len(main_calls) > 0
+        all_names = [name for calls in main_calls.values() for name, _ in calls]
+        assert "NewServer" in all_names
+
+    def test_method_calls_extracted(self):
+        r = _parse(SAMPLE_GO)
+        fc = r.get("function_calls", {})
+        start_calls = {k: v for k, v in fc.items() if "Start" in k}
+        assert len(start_calls) > 0
+        all_names = [name for calls in start_calls.values() for name, _ in calls]
+        assert "Lock" in all_names

@@ -158,3 +158,23 @@ class TestCParsing:
         r = _parse(SAMPLE_C, "stack.c")
         push = next(f for f in r["functions"] if f.name == "push")
         assert len(push.parameters) >= 2
+
+
+# ── Function calls ─────────────────────────────────────────────────────────
+
+class TestCppFunctionCalls:
+    def test_main_calls_extracted(self):
+        r = _parse(SAMPLE_C, "stack.c")
+        fc = r.get("function_calls", {})
+        main_calls = {k: v for k, v in fc.items() if k.endswith(":main")}
+        assert len(main_calls) > 0
+        all_names = [name for calls in main_calls.values() for name, _ in calls]
+        assert "push" in all_names
+
+    def test_cpp_method_calls(self):
+        r = _parse(SAMPLE_CPP)
+        fc = r.get("function_calls", {})
+        main_calls = {k: v for k, v in fc.items() if ":main" in k}
+        assert len(main_calls) > 0
+        all_names = [name for calls in main_calls.values() for name, _ in calls]
+        assert "speak" in all_names

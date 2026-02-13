@@ -51,6 +51,8 @@ class GoLanguageParser(TreeSitterBaseParser):
         imports: List[Import] = []
         interfaces: List[Interface] = []
         relationships: List[Relationship] = []
+        self._current_function_calls: Dict[str, list] = {}
+        self._source_bytes = source_bytes
 
         for child in root.children:
             self._visit_node(child, source_bytes, fp, classes, functions,
@@ -63,6 +65,7 @@ class GoLanguageParser(TreeSitterBaseParser):
             'imports': imports,
             'interfaces': interfaces,
             'relationships': relationships,
+            'function_calls': self._current_function_calls,
         }
 
     def _visit_node(self, node, source_bytes, fp, classes, functions,
@@ -209,6 +212,12 @@ class GoLanguageParser(TreeSitterBaseParser):
         )
         functions.append(func)
 
+        # Extract function calls
+        calls = self._extract_function_calls(
+            node, source_bytes, ('call_expression',))
+        if calls:
+            self._current_function_calls[func_id] = calls
+
     def _parse_method(self, node, source_bytes, fp, functions,
                       relationships, classes):
         """Parse Go method declaration (with receiver)."""
@@ -278,6 +287,12 @@ class GoLanguageParser(TreeSitterBaseParser):
             visibility=visibility,
         )
         functions.append(func)
+
+        # Extract function calls
+        calls = self._extract_function_calls(
+            node, source_bytes, ('call_expression',))
+        if calls:
+            self._current_function_calls[func_id] = calls
 
         if is_method and class_id:
             relationships.append(Relationship(

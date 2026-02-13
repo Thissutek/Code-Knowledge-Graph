@@ -65,6 +65,8 @@ class CppLanguageParser(TreeSitterBaseParser):
         variables: List[Variable] = []
         imports: List[Import] = []
         relationships: List[Relationship] = []
+        self._current_function_calls: Dict[str, list] = {}
+        self._source_bytes = source_bytes
 
         # Track current access specifier for C++ classes
         self._current_access = "public"
@@ -80,6 +82,7 @@ class CppLanguageParser(TreeSitterBaseParser):
             'imports': imports,
             'interfaces': [],
             'relationships': relationships,
+            'function_calls': self._current_function_calls,
         }
 
     def _walk(self, node, source_bytes, fp, classes, functions, variables,
@@ -260,6 +263,12 @@ class CppLanguageParser(TreeSitterBaseParser):
             visibility=visibility,
         )
         functions.append(func)
+
+        # Extract function calls
+        calls = self._extract_function_calls(
+            node, source_bytes, ('call_expression',))
+        if calls:
+            self._current_function_calls[func_id] = calls
 
         if is_method and current_class:
             relationships.append(Relationship(

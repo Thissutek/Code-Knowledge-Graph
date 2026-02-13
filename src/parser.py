@@ -475,12 +475,14 @@ class CodebaseParser:
         for imp in result.get('imports', []):
             codebase.add_relationship('IMPORTS', file_id, imp.id)
 
-        # Store call information for later resolution (Python parser only)
-        if hasattr(parser, 'parse_file'):
-            # Check if we got function_calls tracking from PythonParser
+        # Store call information for later resolution
+        function_calls = result.get('function_calls', {})
+        if function_calls:
+            file_entity._function_calls = function_calls
+        else:
+            # Python parser fallback: re-parse to get call tracking
             from .languages import PythonLanguageParser
             if isinstance(parser, PythonLanguageParser):
-                # Re-parse to get call tracking (PythonParser stores this)
                 py_parser = PythonParser(file_id, self.repo_id, source_code)
                 try:
                     tree = ast.parse(source_code, filename=str(file_path))
@@ -498,6 +500,11 @@ class CodebaseParser:
 
         for cls in codebase.classes:
             class_by_name[cls.name] = cls
+            # Also index by short name for namespaced C++ classes
+            if '::' in cls.name:
+                short = cls.name.rsplit('::', 1)[-1]
+                if short not in class_by_name:
+                    class_by_name[short] = cls
 
         for func in codebase.functions:
             if func.name not in func_by_name:
@@ -510,6 +517,17 @@ class CodebaseParser:
                 if base_name in class_by_name:
                     base_cls = class_by_name[base_name]
                     codebase.add_relationship('EXTENDS', cls.id, base_cls.id)
+
+        # Build interface lookup for IMPLEMENTS resolution
+        interface_by_name = {}
+        for iface in codebase.interfaces:
+            interface_by_name[iface.name] = iface
+
+        # Resolve IMPLEMENTS with unresolved target IDs
+        for rel in codebase.relationships:
+            if rel.rel_type == 'IMPLEMENTS' and ':' not in rel.target_id:
+                if rel.target_id in interface_by_name:
+                    rel.target_id = interface_by_name[rel.target_id].id
 
         # Resolve function calls and class usages
         for file_entity in codebase.files:

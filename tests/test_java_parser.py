@@ -139,3 +139,26 @@ class TestJavaRelationships:
         impl = [rel for rel in r["relationships"] if rel.rel_type == "IMPLEMENTS"]
         # User implements Identifiable
         assert any("Identifiable" in rel.target_id for rel in impl)
+
+
+# ── Function calls ─────────────────────────────────────────────────────────
+
+class TestJavaFunctionCalls:
+    def test_method_calls_extracted(self):
+        r = _parse(SAMPLE_JAVA)
+        fc = r.get("function_calls", {})
+        # findById calls Optional.ofNullable and users.get
+        find_calls = {k: v for k, v in fc.items() if ":findById" in k}
+        assert len(find_calls) > 0
+        all_names = [name for calls in find_calls.values() for name, _ in calls]
+        assert "ofNullable" in all_names
+        assert "get" in all_names
+
+    def test_constructor_calls_extracted(self):
+        r = _parse(SAMPLE_JAVA)
+        fc = r.get("function_calls", {})
+        # UserService constructor creates new HashMap
+        ctor_calls = {k: v for k, v in fc.items() if ":UserService:UserService" in k}
+        assert len(ctor_calls) > 0
+        all_names = [name for calls in ctor_calls.values() for name, _ in calls]
+        assert "HashMap" in all_names

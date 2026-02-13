@@ -51,6 +51,8 @@ class RustLanguageParser(TreeSitterBaseParser):
         imports: List[Import] = []
         interfaces: List[Interface] = []
         relationships: List[Relationship] = []
+        self._current_function_calls: Dict[str, list] = {}
+        self._source_bytes = source_bytes
 
         for child in root.children:
             self._visit_node(child, source_bytes, fp, classes, functions,
@@ -63,6 +65,7 @@ class RustLanguageParser(TreeSitterBaseParser):
             'imports': imports,
             'interfaces': interfaces,
             'relationships': relationships,
+            'function_calls': self._current_function_calls,
         }
 
     def _visit_node(self, node, source_bytes, fp, classes, functions,
@@ -275,6 +278,12 @@ class RustLanguageParser(TreeSitterBaseParser):
         )
         functions.append(func)
 
+        # Extract function calls
+        calls = self._extract_function_calls(
+            node, source_bytes, ('call_expression', 'macro_invocation'))
+        if calls:
+            self._current_function_calls[func_id] = calls
+
         if is_method and current_class:
             relationships.append(Relationship(
                 rel_type='HAS_METHOD',
@@ -289,35 +298,84 @@ class RustLanguageParser(TreeSitterBaseParser):
         # Remove 'use ' or 'pub use ' prefix
         source = text.replace('pub use ', '').replace('use ', '')
 
-        # Handle grouped imports like `use std::{io, fs}`
-        if '{' in source:
-            base = source[:source.index('{')].rstrip(':')
-            group = source[source.index('{') + 1:source.index('}')]
-            symbols = [s.strip() for s in group.split(',') if s.strip()]
-            for sym in symbols:
-                name = sym.split('::')[-1].split(' as ')[-1].strip()
-                full_source = f"{base}::{sym.split(' as ')[0].strip()}"
-                import_id = self._make_id(fp, 'import', full_source)
-                imp = Import(
-                    id=import_id,
-                    name=name,
-                    source=full_source,
-                    is_external=True,
-                    imported_symbols=[name],
-                )
-                imports.append(imp)
-        else:
-            parts = source.split('::')
-            name = parts[-1].split(' as ')[-1].strip()
-            import_id = self._make_id(fp, 'import', source.split(' as ')[0].strip())
+        # Expand into flat paths (handles nested braces recursively)
+        paths = self._expand_use_paths(source)
+        for path in paths:
+            raw = path.split(' as ')[0].strip()
+            name = path.split('::')[-1].split(' as ')[-1].strip()
+            if name == 'self':
+                # `use foo::bar::self` → import bar from foo::bar
+                parts = raw.rsplit('::', 1)
+                name = parts[0].rsplit('::', 1)[-1] if '::' in parts[0] else parts[0]
+            import_id = self._make_id(fp, 'import', raw)
             imp = Import(
                 id=import_id,
                 name=name,
-                source=source.split(' as ')[0].strip(),
+                source=raw,
                 is_external=True,
                 imported_symbols=[name],
             )
             imports.append(imp)
+
+    @staticmethod
+    def _expand_use_paths(source: str) -> list:
+        """Recursively expand Rust use paths with nested braces into flat paths.
+
+        Example: ``std::{io::{Read, Write}, fmt}``
+            → ``['std::io::Read', 'std::io::Write', 'std::fmt']``
+        """
+        if '{' not in source:
+            return [source.strip()] if source.strip() else []
+
+        open_pos = source.index('{')
+        base = source[:open_pos].rstrip(':')
+        close_pos = RustLanguageParser._find_matching_brace(source, open_pos)
+        inner = source[open_pos + 1:close_pos]
+
+        results = []
+        for segment in RustLanguageParser._split_respecting_braces(inner):
+            segment = segment.strip()
+            if not segment:
+                continue
+            full = f"{base}::{segment}" if base else segment
+            # Recurse for nested braces
+            results.extend(RustLanguageParser._expand_use_paths(full))
+        return results
+
+    @staticmethod
+    def _find_matching_brace(s: str, open_pos: int) -> int:
+        """Return the index of the closing brace matching the ``{`` at *open_pos*."""
+        depth = 0
+        for i in range(open_pos, len(s)):
+            if s[i] == '{':
+                depth += 1
+            elif s[i] == '}':
+                depth -= 1
+                if depth == 0:
+                    return i
+        return len(s) - 1  # fallback
+
+    @staticmethod
+    def _split_respecting_braces(s: str) -> list:
+        """Split *s* on commas that are not inside braces."""
+        parts = []
+        depth = 0
+        current = []
+        for ch in s:
+            if ch == '{':
+                depth += 1
+                current.append(ch)
+            elif ch == '}':
+                depth -= 1
+                current.append(ch)
+            elif ch == ',' and depth == 0:
+                parts.append(''.join(current))
+                current = []
+            else:
+                current.append(ch)
+        if current:
+            parts.append(''.join(current))
+        return parts
 
     def _parse_variable(self, node, source_bytes, fp, variables, is_const):
         """Parse Rust const/static/let declarations."""

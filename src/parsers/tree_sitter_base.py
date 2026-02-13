@@ -3,7 +3,7 @@ Shared base class for all tree-sitter based language parsers.
 """
 from abc import abstractmethod
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 
 from tree_sitter import Language, Parser, Node
 
@@ -126,3 +126,86 @@ class TreeSitterBaseParser(LanguageParser):
         for desc in self._find_descendants_by_type(node, *branch_types):
             complexity += 1
         return complexity
+
+    # ── Call extraction helpers ────────────────────────────────────────────
+
+    def _extract_function_calls(
+        self, func_node: Node, source_bytes: bytes,
+        call_node_types: tuple = ('call_expression',),
+    ) -> List[Tuple[str, int]]:
+        """Walk *func_node* for call sites and return ``[(name, line), ...]``."""
+        calls: List[Tuple[str, int]] = []
+        for call_node in self._find_descendants_by_type(func_node, *call_node_types):
+            name = self._extract_call_name(call_node, source_bytes)
+            if name:
+                line = call_node.start_point[0] + 1
+                calls.append((name, line))
+        return calls
+
+    def _extract_call_name(self, call_node: Node, source_bytes: bytes) -> Optional[str]:
+        """Extract the called function name from a call-expression node.
+
+        Handles: ``foo()``, ``obj.foo()``, ``Mod::func()``, ``new Foo()``,
+        ``macro!()``.
+        """
+        # member_expression / field_expression: obj.method() → method
+        member = self._find_first_child_by_type(
+            call_node, 'member_expression', 'field_expression',
+            'selector_expression')
+        if member:
+            prop = self._find_first_child_by_type(
+                member, 'property_identifier', 'field_identifier')
+            if prop:
+                return self._extract_text(prop, source_bytes)
+            # Fall through to pick last identifier from member node
+            ids = self._find_children_by_type(member, 'identifier')
+            if len(ids) >= 2:
+                return self._extract_text(ids[-1], source_bytes)
+            elif ids:
+                return self._extract_text(ids[0], source_bytes)
+
+        # Java method_invocation: Object.method(...) — identifiers separated by '.'
+        # Pick the identifier right after the '.' separator
+        if call_node.type == 'method_invocation':
+            saw_dot = False
+            for child in call_node.children:
+                if child.type == '.':
+                    saw_dot = True
+                elif saw_dot and child.type == 'identifier':
+                    return self._extract_text(child, source_bytes)
+            # Single identifier call (no dot): just return it
+            ident = self._find_first_child_by_type(call_node, 'identifier')
+            if ident:
+                return self._extract_text(ident, source_bytes)
+
+        # scoped_identifier: Mod::func()
+        scoped = self._find_first_child_by_type(
+            call_node, 'scoped_identifier')
+        if scoped:
+            name_node = self._find_first_child_by_type(scoped, 'identifier')
+            if name_node:
+                return self._extract_text(name_node, source_bytes)
+
+        # Direct identifier: foo()
+        func = self._find_first_child_by_type(
+            call_node, 'identifier', 'field_identifier', 'property_identifier')
+        if func:
+            return self._extract_text(func, source_bytes)
+
+        # super() call
+        super_node = self._find_first_child_by_type(call_node, 'super')
+        if super_node:
+            return 'super'
+
+        # new_expression / object_creation_expression: new Foo()
+        type_node = self._find_first_child_by_type(
+            call_node, 'type_identifier')
+        if type_node:
+            return self._extract_text(type_node, source_bytes)
+        # Look deeper for type_identifier (e.g., generic_type wrapping)
+        type_descs = self._find_descendants_by_type(
+            call_node, 'type_identifier')
+        if type_descs:
+            return self._extract_text(type_descs[-1], source_bytes)
+
+        return None

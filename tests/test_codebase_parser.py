@@ -151,6 +151,86 @@ class TestCodebaseParserIncremental:
         assert len(codebase.functions) >= 4
 
 
+# ── Call graph resolution ──────────────────────────────────────────────────
+
+class TestCallGraphResolution:
+    """Verify CALLS relationships are resolved from all languages."""
+
+    def test_python_calls_resolved(self, sample_repo):
+        parser = CodebaseParser(str(sample_repo), "call-test")
+        codebase = parser.parse()
+        calls = [r for r in codebase.relationships if r.rel_type == "CALLS"]
+        # main() calls create_service()
+        assert any("main" in r.source_id and "create_service" in r.target_id
+                    for r in calls)
+
+    def test_non_python_calls_present(self, sample_repo):
+        parser = CodebaseParser(str(sample_repo), "call-test")
+        codebase = parser.parse()
+        calls = [r for r in codebase.relationships if r.rel_type == "CALLS"]
+        # Should have calls from non-Python languages too
+        # Go main calls NewServer, C main calls push, etc.
+        call_names = [(r.source_id, r.target_id) for r in calls]
+        non_python_calls = [
+            (s, t) for s, t in call_names if not s.endswith('.py')
+        ]
+        # At minimum we should have some non-Python CALLS
+        # (Go main->NewServer, C main->push, etc.)
+        assert len(non_python_calls) > 0
+
+
+# ── EXTENDS relationships ───────────────────────────────────────────────────
+
+class TestExtendsRelationships:
+    """Verify EXTENDS relationships are resolved across languages."""
+
+    def test_python_extends(self, sample_repo):
+        parser = CodebaseParser(str(sample_repo), "ext-test")
+        codebase = parser.parse()
+        extends = [r for r in codebase.relationships if r.rel_type == "EXTENDS"]
+        # Service extends Config
+        assert any("Service" in r.source_id and "Config" in r.target_id
+                    for r in extends)
+
+    def test_cpp_extends(self, sample_repo):
+        parser = CodebaseParser(str(sample_repo), "ext-test")
+        codebase = parser.parse()
+        extends = [r for r in codebase.relationships if r.rel_type == "EXTENDS"]
+        # Dog extends Animal
+        assert any("Dog" in r.source_id and "Animal" in r.target_id
+                    for r in extends)
+
+
+# ── IMPLEMENTS resolution ──────────────────────────────────────────────────
+
+class TestImplementsResolution:
+    """Verify IMPLEMENTS target IDs are resolved to full interface IDs."""
+
+    def test_typescript_implements_resolved(self, sample_repo):
+        parser = CodebaseParser(str(sample_repo), "impl-test")
+        codebase = parser.parse()
+        impl_rels = [r for r in codebase.relationships
+                     if r.rel_type == "IMPLEMENTS"]
+        # HttpClient implements Fetchable — target should be fully qualified
+        fetchable_rels = [r for r in impl_rels if "HttpClient" in r.source_id]
+        assert len(fetchable_rels) > 0
+        for r in fetchable_rels:
+            assert ':' in r.target_id, (
+                f"IMPLEMENTS target should be resolved: {r.target_id}")
+
+    def test_java_implements_resolved(self, sample_repo):
+        parser = CodebaseParser(str(sample_repo), "impl-test")
+        codebase = parser.parse()
+        impl_rels = [r for r in codebase.relationships
+                     if r.rel_type == "IMPLEMENTS"]
+        # User implements Identifiable — target should be fully qualified
+        user_rels = [r for r in impl_rels if "User" in r.source_id]
+        assert len(user_rels) > 0
+        for r in user_rels:
+            assert ':' in r.target_id, (
+                f"IMPLEMENTS target should be resolved: {r.target_id}")
+
+
 # ── Ignore directories ──────────────────────────────────────────────────────
 
 class TestIgnoreDirs:
