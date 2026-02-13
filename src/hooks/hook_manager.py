@@ -26,7 +26,9 @@ class HookManager:
 
     def install(self, repo_path: str, repo_id: Optional[str] = None,
                 mode: str = 'incremental',
-                neo4j_uri: str = 'bolt://localhost:7687'):
+                neo4j_uri: str = 'bolt://localhost:7687',
+                neo4j_user: str = 'neo4j',
+                neo4j_password: str = 'password'):
         """Install code-kag hooks into a git repository.
 
         Args:
@@ -34,6 +36,8 @@ class HookManager:
             repo_id: Repository identifier (defaults to directory name).
             mode: 'incremental' or 'full' re-indexing mode.
             neo4j_uri: Neo4j connection URI.
+            neo4j_user: Neo4j username.
+            neo4j_password: Neo4j password.
         """
         repo = Path(repo_path).resolve()
         hooks_dir = repo / '.git' / 'hooks'
@@ -48,6 +52,8 @@ class HookManager:
         # Validate values against shell injection
         for name, value in [('repo_id', repo_id), ('mode', mode),
                             ('neo4j_uri', neo4j_uri),
+                            ('neo4j_user', neo4j_user),
+                            ('neo4j_password', neo4j_password),
                             ('code_kag_path', self.code_kag_path)]:
             if not _SAFE_SHELL_VALUE.match(value):
                 raise ValueError(
@@ -63,6 +69,8 @@ class HookManager:
             .replace('{{REPO_ID}}', repo_id)
             .replace('{{MODE}}', mode)
             .replace('{{NEO4J_URI}}', neo4j_uri)
+            .replace('{{NEO4J_USER}}', neo4j_user)
+            .replace('{{NEO4J_PASSWORD}}', neo4j_password)
         )
         common_dest = hooks_dir / 'code-kag-common.sh'
         common_dest.write_text(common_content)

@@ -6,6 +6,8 @@ CODE_KAG_PATH="{{CODE_KAG_PATH}}"
 REPO_ID="{{REPO_ID}}"
 MODE="{{MODE}}"
 NEO4J_URI="{{NEO4J_URI}}"
+NEO4J_USER="{{NEO4J_USER}}"
+NEO4J_PASSWORD="{{NEO4J_PASSWORD}}"
 
 LOCKFILE="/tmp/code-kag-reindex-${REPO_ID}.lock"
 LOGFILE="/tmp/code-kag-reindex-${REPO_ID}.log"
@@ -61,6 +63,8 @@ code_kag_reindex() {
             echo "[code-kag] Incremental re-index: ${#files[@]} file(s)"
             "$PYTHON" "$CODE_KAG_PATH/cli.py" \
                 --neo4j-uri "$NEO4J_URI" \
+                --neo4j-user "$NEO4J_USER" \
+                --neo4j-password "$NEO4J_PASSWORD" \
                 index "$(pwd)" \
                 --id "$REPO_ID" \
                 --incremental \
@@ -71,6 +75,8 @@ code_kag_reindex() {
             echo "[code-kag] Full re-index"
             "$PYTHON" "$CODE_KAG_PATH/cli.py" \
                 --neo4j-uri "$NEO4J_URI" \
+                --neo4j-user "$NEO4J_USER" \
+                --neo4j-password "$NEO4J_PASSWORD" \
                 index "$(pwd)" \
                 --id "$REPO_ID" \
                 >> "$LOGFILE" 2>&1

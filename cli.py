@@ -141,6 +141,8 @@ def cmd_hooks_install(args):
         repo_id=args.id,
         mode=args.mode,
         neo4j_uri=args.neo4j_uri,
+        neo4j_user=args.neo4j_user,
+        neo4j_password=args.neo4j_password,
     )
 
 
