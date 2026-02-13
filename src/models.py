@@ -1,6 +1,6 @@
 """
 Code Knowledge Graph Data Models
-Defines the structure for code entities and their relationships
+Defines the structure for code entities and their relationships.
 """
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
