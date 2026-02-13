@@ -10,6 +10,18 @@ NEO4J_URI="{{NEO4J_URI}}"
 LOCKFILE="/tmp/code-kag-reindex-${REPO_ID}.lock"
 LOGFILE="/tmp/code-kag-reindex-${REPO_ID}.log"
 
+# Find the right Python: prefer the project venv, then python3, then python
+if [ -x "$CODE_KAG_PATH/.venv/bin/python" ]; then
+    PYTHON="$CODE_KAG_PATH/.venv/bin/python"
+elif command -v python3 &>/dev/null; then
+    PYTHON="python3"
+elif command -v python &>/dev/null; then
+    PYTHON="python"
+else
+    echo "[code-kag] ERROR: No python or python3 found in PATH" >&2
+    return 1 2>/dev/null || exit 1
+fi
+
 code_kag_reindex() {
     local mode="$1"
     shift
@@ -23,7 +35,7 @@ code_kag_reindex() {
 
     if ! nc -z "$neo4j_host" "$neo4j_port" 2>/dev/null; then
         echo "[code-kag] WARNING: Neo4j is not reachable at $NEO4J_URI" >&2
-        echo "[code-kag] Skipping re-index. Start Neo4j and re-run: python \"$CODE_KAG_PATH/cli.py\" index \"$(pwd)\" --id \"$REPO_ID\"" >&2
+        echo "[code-kag] Skipping re-index. Start Neo4j and re-run: $PYTHON \"$CODE_KAG_PATH/cli.py\" index \"$(pwd)\" --id \"$REPO_ID\"" >&2
         echo "$(date '+%Y-%m-%d %H:%M:%S') SKIPPED: Neo4j not reachable at $NEO4J_URI" >> "$LOGFILE"
         return 1
     fi
@@ -47,7 +59,7 @@ code_kag_reindex() {
 
         if [ "$mode" = "incremental" ] && [ ${#files[@]} -gt 0 ]; then
             echo "[code-kag] Incremental re-index: ${#files[@]} file(s)"
-            python "$CODE_KAG_PATH/cli.py" index "$(pwd)" \
+            "$PYTHON" "$CODE_KAG_PATH/cli.py" index "$(pwd)" \
                 --id "$REPO_ID" \
                 --neo4j-uri "$NEO4J_URI" \
                 --incremental \
@@ -56,7 +68,7 @@ code_kag_reindex() {
             exit_code=$?
         else
             echo "[code-kag] Full re-index"
-            python "$CODE_KAG_PATH/cli.py" index "$(pwd)" \
+            "$PYTHON" "$CODE_KAG_PATH/cli.py" index "$(pwd)" \
                 --id "$REPO_ID" \
                 --neo4j-uri "$NEO4J_URI" \
                 >> "$LOGFILE" 2>&1
