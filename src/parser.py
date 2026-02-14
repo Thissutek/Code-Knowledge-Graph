@@ -479,18 +479,9 @@ class CodebaseParser:
         function_calls = result.get('function_calls', {})
         if function_calls:
             file_entity._function_calls = function_calls
-        else:
-            # Python parser fallback: re-parse to get call tracking
-            from .languages import PythonLanguageParser
-            if isinstance(parser, PythonLanguageParser):
-                py_parser = PythonParser(file_id, self.repo_id, source_code)
-                try:
-                    tree = ast.parse(source_code, filename=str(file_path))
-                    py_parser.visit(tree)
-                    file_entity._function_calls = py_parser.function_calls
-                    file_entity._class_usages = py_parser.class_usages
-                except SyntaxError:
-                    pass
+        class_usages = result.get('class_usages', {})
+        if class_usages:
+            file_entity._class_usages = class_usages
 
     def _resolve_relationships(self, codebase: ParsedCodebase):
         """Resolve cross-file relationships"""
