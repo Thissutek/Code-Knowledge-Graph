@@ -4,7 +4,7 @@ Tests for the Java tree-sitter parser.
 from pathlib import Path
 
 from src.parsers.java_parser import JavaLanguageParser
-from tests.conftest import SAMPLE_JAVA
+from tests.conftest import SAMPLE_JAVA, SAMPLE_JAVA_INNER_CLASSES
 
 
 def _parse(code: str, filename: str = "Test.java"):
@@ -162,3 +162,67 @@ class TestJavaFunctionCalls:
         assert len(ctor_calls) > 0
         all_names = [name for calls in ctor_calls.values() for name, _ in calls]
         assert "HashMap" in all_names
+
+
+# ── Inner classes ──────────────────────────────────────────────────────────
+
+class TestJavaInnerClasses:
+    """Tests for Java inner class ID collision fix."""
+
+    def setup_method(self):
+        self.result = _parse(SAMPLE_JAVA_INNER_CLASSES, "Container.java")
+        self.classes = self.result["classes"]
+        self.functions = self.result["functions"]
+        self.variables = self.result["variables"]
+        self.relationships = self.result["relationships"]
+
+    def test_inner_class_ids_are_unique(self):
+        inners = [c for c in self.classes if c.name == "Inner"]
+        assert len(inners) == 2
+        assert inners[0].id != inners[1].id
+
+    def test_inner_class_ids_include_parent_name(self):
+        inners = [c for c in self.classes if c.name == "Inner"]
+        ids = {c.id for c in inners}
+        assert "Container.java:Outer1:Inner" in ids
+        assert "Container.java:Outer2:Inner" in ids
+
+    def test_inner_method_ids_are_unique(self):
+        do_works = [f for f in self.functions if f.name == "doWork"]
+        assert len(do_works) == 2
+        assert do_works[0].id != do_works[1].id
+
+    def test_inner_method_ids_include_full_hierarchy(self):
+        do_works = [f for f in self.functions if f.name == "doWork"]
+        ids = {f.id for f in do_works}
+        assert "Container.java:Outer1:Inner:doWork" in ids
+        assert "Container.java:Outer2:Inner:doWork" in ids
+
+    def test_inner_variable_ids_are_unique(self):
+        inner_ids = {c.id for c in self.classes if c.name == "Inner"}
+        inner_vars = [
+            v for v in self.variables
+            if any(
+                r.source_id in inner_ids and r.target_id == v.id
+                for r in self.relationships if r.rel_type == "HAS_VARIABLE"
+            )
+        ]
+        assert len(inner_vars) == 2
+        assert inner_vars[0].id != inner_vars[1].id
+
+    def test_inner_class_relationships_point_to_correct_parents(self):
+        inner_rels = [
+            r for r in self.relationships
+            if r.rel_type == "HAS_VARIABLE"
+            and r.properties
+            and r.properties.get("kind") == "inner_class"
+        ]
+        source_target = {(r.source_id, r.target_id) for r in inner_rels}
+        assert ("Container.java:Outer1", "Container.java:Outer1:Inner") in source_target
+        assert ("Container.java:Outer2", "Container.java:Outer2:Inner") in source_target
+
+    def test_top_level_class_ids_unchanged(self):
+        outers = [c for c in self.classes if c.name in ("Outer1", "Outer2")]
+        ids = {c.id for c in outers}
+        assert "Container.java:Outer1" in ids
+        assert "Container.java:Outer2" in ids
