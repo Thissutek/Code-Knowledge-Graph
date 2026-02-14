@@ -604,33 +604,57 @@ class CodeKAGQuerier:
             return dict(record) if record else {}
     
     def find_similar_functions(self, function_id: str, limit: int = 5, repo_id: str = None) -> List[Dict]:
-        """Find functions with similar structure (same classes used, similar calls)"""
+        """Find functions with similar structure (shared calls and class usage)"""
         with self.driver.session() as session:
             if repo_id:
                 result = session.run("""
                     MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(:File)-[:DEFINES_FUNCTION|HAS_METHOD*]->(f:Function {id: $function_id})
-                    WITH f
-                    MATCH (f)-[:CALLS]->(called:Function)
-                    WITH f, collect(called) AS fCalls
-                    MATCH (r2:Repository {id: $repo_id})-[:CONTAINS_FILE]->(:File)-[:DEFINES_FUNCTION|HAS_METHOD*]->(other:Function)-[:CALLS]->(otherCalled:Function)
-                    WHERE other <> f AND otherCalled IN fCalls
-                    WITH other, count(DISTINCT otherCalled) AS commonCalls, size(fCalls) AS totalCalls
-                    WHERE commonCalls > 0
+                    OPTIONAL MATCH (f)-[:CALLS]->(called:Function)
+                    OPTIONAL MATCH (f)-[:USES_CLASS]->(usedClass:Class)
+                    WITH f, collect(DISTINCT called) AS fCalls, collect(DISTINCT usedClass) AS fClasses
+                    WHERE size(fCalls) > 0 OR size(fClasses) > 0
+                    MATCH (r2:Repository {id: $repo_id})-[:CONTAINS_FILE]->(:File)-[:DEFINES_FUNCTION|HAS_METHOD*]->(other:Function)
+                    WHERE other <> f
+                    OPTIONAL MATCH (other)-[:CALLS]->(otherCalled:Function)
+                    WHERE otherCalled IN fCalls
+                    OPTIONAL MATCH (other)-[:USES_CLASS]->(otherClass:Class)
+                    WHERE otherClass IN fClasses
+                    WITH other, f, fCalls, fClasses,
+                         count(DISTINCT otherCalled) AS commonCalls,
+                         count(DISTINCT otherClass) AS commonClasses
+                    WHERE commonCalls > 0 OR commonClasses > 0
+                    WITH other, commonCalls, commonClasses,
+                         CASE WHEN size(fCalls) + size(fClasses) = 0 THEN 0.0
+                              ELSE toFloat(commonCalls + commonClasses) / (size(fCalls) + size(fClasses))
+                         END AS similarity
                     RETURN other.id AS id, other.name AS name, other.signature AS signature,
-                           commonCalls, toFloat(commonCalls) / totalCalls AS similarity
+                           commonCalls, commonClasses, similarity
                     ORDER BY similarity DESC
                     LIMIT $limit
                 """, function_id=function_id, limit=limit, repo_id=repo_id)
             else:
                 result = session.run("""
-                    MATCH (f:Function {id: $function_id})-[:CALLS]->(called:Function)
-                    WITH f, collect(called) AS fCalls
-                    MATCH (other:Function)-[:CALLS]->(otherCalled:Function)
-                    WHERE other <> f AND otherCalled IN fCalls
-                    WITH other, count(DISTINCT otherCalled) AS commonCalls, size(fCalls) AS totalCalls
-                    WHERE commonCalls > 0
+                    MATCH (f:Function {id: $function_id})
+                    OPTIONAL MATCH (f)-[:CALLS]->(called:Function)
+                    OPTIONAL MATCH (f)-[:USES_CLASS]->(usedClass:Class)
+                    WITH f, collect(DISTINCT called) AS fCalls, collect(DISTINCT usedClass) AS fClasses
+                    WHERE size(fCalls) > 0 OR size(fClasses) > 0
+                    MATCH (other:Function)
+                    WHERE other <> f
+                    OPTIONAL MATCH (other)-[:CALLS]->(otherCalled:Function)
+                    WHERE otherCalled IN fCalls
+                    OPTIONAL MATCH (other)-[:USES_CLASS]->(otherClass:Class)
+                    WHERE otherClass IN fClasses
+                    WITH other, f, fCalls, fClasses,
+                         count(DISTINCT otherCalled) AS commonCalls,
+                         count(DISTINCT otherClass) AS commonClasses
+                    WHERE commonCalls > 0 OR commonClasses > 0
+                    WITH other, commonCalls, commonClasses,
+                         CASE WHEN size(fCalls) + size(fClasses) = 0 THEN 0.0
+                              ELSE toFloat(commonCalls + commonClasses) / (size(fCalls) + size(fClasses))
+                         END AS similarity
                     RETURN other.id AS id, other.name AS name, other.signature AS signature,
-                           commonCalls, toFloat(commonCalls) / totalCalls AS similarity
+                           commonCalls, commonClasses, similarity
                     ORDER BY similarity DESC
                     LIMIT $limit
                 """, function_id=function_id, limit=limit)
