@@ -114,7 +114,9 @@ class PythonLanguageParser(LanguageParser):
             'functions': parser.functions,
             'variables': parser.variables,
             'imports': parser.imports,
-            'relationships': parser.relationships
+            'relationships': parser.relationships,
+            'function_calls': parser.function_calls,
+            'class_usages': parser.class_usages,
         }
 
 
