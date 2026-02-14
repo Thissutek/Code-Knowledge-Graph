@@ -77,13 +77,68 @@ class Neo4jIngester:
         print("Constraints and indexes created")
     
     def clear_repository(self, repo_id: str):
-        """Clear all data for a specific repository"""
+        """Clear all data for a specific repository.
+
+        Deletes leaf nodes first and works upward to avoid holding the
+        entire subgraph in a single transaction (which can exceed Neo4j's
+        transaction memory limit on large repositories).
+        """
         with self.driver.session() as session:
-            # Delete all nodes connected to this repository
+            # 1. Delete class members (methods, variables) — deepest leaves
+            session.run("""
+                MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(f:File)
+                      -[:DEFINES_CLASS]->(c:Class)-[:HAS_METHOD]->(m:Function)
+                DETACH DELETE m
+            """, repo_id=repo_id)
+            session.run("""
+                MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(f:File)
+                      -[:DEFINES_CLASS]->(c:Class)-[:HAS_VARIABLE]->(v:Variable)
+                DETACH DELETE v
+            """, repo_id=repo_id)
+
+            # 2. Delete file-level entities (classes, functions, interfaces, imports)
+            session.run("""
+                MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(f:File)
+                      -[:DEFINES_CLASS]->(c:Class)
+                DETACH DELETE c
+            """, repo_id=repo_id)
+            session.run("""
+                MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(f:File)
+                      -[:DEFINES_FUNCTION]->(fn:Function)
+                DETACH DELETE fn
+            """, repo_id=repo_id)
+            session.run("""
+                MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(f:File)
+                      -[:DEFINES_INTERFACE]->(i:Interface)
+                DETACH DELETE i
+            """, repo_id=repo_id)
+            session.run("""
+                MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(f:File)
+                      -[:IMPORTS]->(imp:Import)
+                DETACH DELETE imp
+            """, repo_id=repo_id)
+
+            # 3. Delete file-level variables (globals)
+            session.run("""
+                MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(f:File)
+                      -[:DEFINES_VARIABLE]->(v:Variable)
+                DETACH DELETE v
+            """, repo_id=repo_id)
+
+            # 4. Delete files and modules
+            session.run("""
+                MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(f:File)
+                DETACH DELETE f
+            """, repo_id=repo_id)
+            session.run("""
+                MATCH (r:Repository {id: $repo_id})-[:CONTAINS_MODULE]->(m:Module)
+                DETACH DELETE m
+            """, repo_id=repo_id)
+
+            # 5. Delete the repository node
             session.run("""
                 MATCH (r:Repository {id: $repo_id})
-                OPTIONAL MATCH (r)-[*]->(n)
-                DETACH DELETE n, r
+                DETACH DELETE r
             """, repo_id=repo_id)
         print(f"Cleared existing data for repository: {repo_id}")
     
