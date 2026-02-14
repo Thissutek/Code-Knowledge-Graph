@@ -74,7 +74,7 @@ class GoLanguageParser(TreeSitterBaseParser):
 
         if ntype == 'type_declaration':
             self._parse_type_declaration(node, source_bytes, fp, classes,
-                                         interfaces, relationships)
+                                         interfaces, relationships, variables)
         elif ntype == 'function_declaration':
             self._parse_function(node, source_bytes, fp, functions,
                                  relationships)
@@ -89,7 +89,7 @@ class GoLanguageParser(TreeSitterBaseParser):
                                  is_const=(ntype == 'const_declaration'))
 
     def _parse_type_declaration(self, node, source_bytes, fp, classes,
-                                interfaces, relationships):
+                                interfaces, relationships, variables=None):
         """Parse Go type declarations (struct, interface, type alias)."""
         for spec in self._find_children_by_type(node, 'type_spec'):
             name_node = self._find_first_child_by_type(spec, 'type_identifier')
@@ -103,7 +103,7 @@ class GoLanguageParser(TreeSitterBaseParser):
 
             if struct_type:
                 self._parse_struct(name, struct_type, source_bytes, fp,
-                                   classes, relationships, node)
+                                   classes, relationships, node, variables)
             elif iface_type:
                 self._parse_interface(name, iface_type, source_bytes, fp,
                                       interfaces, node)
@@ -122,24 +122,47 @@ class GoLanguageParser(TreeSitterBaseParser):
                 classes.append(cls)
 
     def _parse_struct(self, name, struct_node, source_bytes, fp, classes,
-                      relationships, decl_node):
+                      relationships, decl_node, variables=None):
         """Parse Go struct type."""
         class_id = self._make_id(fp, name)
         visibility = "public" if name[0].isupper() else "private"
 
-        # Extract embedded types (composition, similar to inheritance)
+        # Extract embedded types and named fields
         base_classes = []
         field_list = self._find_first_child_by_type(struct_node, 'field_declaration_list')
         if field_list:
             for field in self._find_children_by_type(field_list, 'field_declaration'):
-                # Check if it's an embedded field (no explicit name)
-                names = self._find_children_by_type(field, 'field_identifier')
-                types = self._find_children_by_type(
-                    field, 'type_identifier', 'qualified_type', 'pointer_type')
-                if not names and types:
-                    # Embedded type
-                    type_text = self._extract_text(types[0], source_bytes).lstrip('*')
+                field_names = self._find_children_by_type(field, 'field_identifier')
+                type_nodes = self._find_children_by_type(
+                    field, 'type_identifier', 'qualified_type', 'pointer_type',
+                    'array_type', 'slice_type', 'map_type', 'interface_type',
+                    'function_type', 'channel_type', 'struct_type')
+                if not field_names and type_nodes:
+                    # Embedded type (composition)
+                    type_text = self._extract_text(type_nodes[0], source_bytes).lstrip('*')
                     base_classes.append(type_text)
+                elif field_names and variables is not None:
+                    # Named field — extract as Variable
+                    type_ann = self._extract_text(
+                        type_nodes[0], source_bytes) if type_nodes else None
+                    for fn in field_names:
+                        fname = self._extract_text(fn, source_bytes)
+                        var_id = self._make_id(fp, name, fname)
+                        field_vis = "public" if fname[0].isupper() else "private"
+                        var = Variable(
+                            id=var_id,
+                            name=fname,
+                            var_type=type_ann,
+                            scope='instance',
+                            is_constant=False,
+                        )
+                        variables.append(var)
+                        relationships.append(Relationship(
+                            rel_type='HAS_VARIABLE',
+                            source_id=class_id,
+                            target_id=var_id,
+                            properties={'visibility': field_vis}
+                        ))
 
         cls = Class(
             id=class_id,

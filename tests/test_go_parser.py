@@ -111,6 +111,45 @@ class TestGoVariables:
         assert "DefaultTimeout" in names
 
 
+# ── Struct fields ──────────────────────────────────────────────────────────
+
+class TestGoStructFields:
+    def test_named_fields_extracted(self):
+        r = _parse(SAMPLE_GO)
+        field_names = [v.name for v in r["variables"] if v.scope == "instance"]
+        assert "Host" in field_names
+        assert "Port" in field_names
+
+    def test_field_types(self):
+        r = _parse(SAMPLE_GO)
+        host = next(v for v in r["variables"] if v.name == "Host")
+        port = next(v for v in r["variables"] if v.name == "Port")
+        assert host.var_type == "string"
+        assert port.var_type == "int"
+
+    def test_field_visibility(self):
+        r = _parse(SAMPLE_GO)
+        rels = [rel for rel in r["relationships"] if rel.rel_type == "HAS_VARIABLE"]
+        # Server struct fields: mu (private) and running (private)
+        server_fields = [rel for rel in rels if "Server" in rel.source_id]
+        vis = [rel.properties.get("visibility") for rel in server_fields]
+        assert "private" in vis
+
+    def test_has_variable_relationships(self):
+        r = _parse(SAMPLE_GO)
+        hv = [rel for rel in r["relationships"] if rel.rel_type == "HAS_VARIABLE"]
+        # Config has Host, Port; Server has mu, running
+        assert len(hv) >= 4
+
+    def test_embedded_not_duplicated_as_field(self):
+        """Embedded types should be in base_classes, not as Variables."""
+        r = _parse(SAMPLE_GO)
+        field_names = [v.name for v in r["variables"] if v.scope == "instance"]
+        assert "Config" not in field_names
+        srv = next(c for c in r["classes"] if c.name == "Server")
+        assert "Config" in srv.base_classes
+
+
 # ── Imports ─────────────────────────────────────────────────────────────────
 
 class TestGoImports:
