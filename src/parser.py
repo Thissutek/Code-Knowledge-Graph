@@ -524,10 +524,21 @@ class CodebaseParser:
             interface_by_name[iface.name] = iface
 
         # Resolve IMPLEMENTS with unresolved target IDs
+        unresolved_implements = []
         for rel in codebase.relationships:
             if rel.rel_type == 'IMPLEMENTS' and ':' not in rel.target_id:
                 if rel.target_id in interface_by_name:
                     rel.target_id = interface_by_name[rel.target_id].id
+                elif rel.target_id in class_by_name:
+                    # Target may be a Class with language_type="interface"/"trait"
+                    rel.target_id = class_by_name[rel.target_id].id
+                else:
+                    unresolved_implements.append(rel)
+
+        # Remove unresolvable IMPLEMENTS relationships (external dependencies)
+        for rel in unresolved_implements:
+            if rel in codebase.relationships:
+                codebase.relationships.remove(rel)
 
         # Resolve function calls and class usages
         for file_entity in codebase.files:
