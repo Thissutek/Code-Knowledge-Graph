@@ -385,19 +385,19 @@ async def handle_search_code(arguments: Dict[str, Any]) -> str:
             if repo_id:
                 result = session.run("""
                     MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(f:File)
-                    WHERE f.name CONTAINS $query OR f.path CONTAINS $query
+                    WHERE f.name CONTAINS $search_term OR f.path CONTAINS $search_term
                     RETURN f.id AS id, f.name AS name, f.path AS path,
                            f.linesOfCode AS lines
                     LIMIT $limit
-                """, query=query, limit=limit, repo_id=repo_id)
+                """, search_term=query, limit=limit, repo_id=repo_id)
             else:
                 result = session.run("""
                     MATCH (f:File)
-                    WHERE f.name CONTAINS $query OR f.path CONTAINS $query
+                    WHERE f.name CONTAINS $search_term OR f.path CONTAINS $search_term
                     RETURN f.id AS id, f.name AS name, f.path AS path,
                            f.linesOfCode AS lines
                     LIMIT $limit
-                """, query=query, limit=limit)
+                """, search_term=query, limit=limit)
             results = [dict(r) for r in result]
     else:
         results = []
