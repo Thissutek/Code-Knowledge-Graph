@@ -365,26 +365,39 @@ class Neo4jIngester:
             if rel_type not in rel_config:
                 print(f"Warning: Unknown relationship type {rel_type}")
                 continue
-            
+
             source_label, target_label = rel_config[rel_type]
-            
+
             # Build property setting clause
             prop_keys = set()
             for record in records:
                 prop_keys.update(k for k in record.keys() if k not in ['type', 'sourceId', 'targetId'])
-            
+
             prop_clause = ', '.join([f'rel.{k} = record.{k}' for k in prop_keys])
             if prop_clause:
                 prop_clause = 'SET ' + prop_clause
-            
-            query = f"""
-                UNWIND $records AS record
-                MATCH (source:{source_label} {{id: record.sourceId}})
-                MATCH (target:{target_label} {{id: record.targetId}})
-                MERGE (source)-[rel:{rel_type}]->(target)
-                {prop_clause}
-            """
-            
+
+            # IMPLEMENTS targets can be Interface or Class nodes (e.g.
+            # language_type="interface"/"trait") depending on how the
+            # parser modelled the target entity.
+            if rel_type == 'IMPLEMENTS':
+                query = f"""
+                    UNWIND $records AS record
+                    MATCH (source:{source_label} {{id: record.sourceId}})
+                    MATCH (target {{id: record.targetId}})
+                    WHERE target:Interface OR target:Class
+                    MERGE (source)-[rel:{rel_type}]->(target)
+                    {prop_clause}
+                """
+            else:
+                query = f"""
+                    UNWIND $records AS record
+                    MATCH (source:{source_label} {{id: record.sourceId}})
+                    MATCH (target:{target_label} {{id: record.targetId}})
+                    MERGE (source)-[rel:{rel_type}]->(target)
+                    {prop_clause}
+                """
+
             try:
                 session.run(query, records=records)
             except Exception as e:
