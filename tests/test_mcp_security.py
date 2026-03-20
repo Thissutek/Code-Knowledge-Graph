@@ -13,10 +13,10 @@ class TestPasswordNotBakedIntoCommonSh:
     def test_password_not_written_to_common_sh(self, git_repo):
         """Installing with a password should NOT bake it into common.sh."""
         hm = HookManager()
-        hm.install(str(git_repo), repo_id="test", neo4j_password="supersecret123")
+        hm.install(str(git_repo), repo_id="test", neo4j_password="FAKE_NEO4J_PW_FOR_TESTING")
 
         common = (git_repo / ".git" / "hooks" / "code-kag-common.sh").read_text()
-        assert "supersecret123" not in common
+        assert "FAKE_NEO4J_PW_FOR_TESTING" not in common
 
     def test_common_sh_uses_env_var_expansion(self, git_repo):
         """common.sh should reference NEO4J_PASSWORD via env var, not literal."""
