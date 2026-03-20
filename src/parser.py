@@ -332,10 +332,15 @@ class CodebaseParser:
     def __init__(self, repo_path: str, repo_id: Optional[str] = None):
         self.repo_path = Path(repo_path).resolve()
         self.repo_id = repo_id or self.repo_path.name
+        self._pending_function_calls: Dict[str, Dict] = {}
+        self._pending_class_usages: Dict[str, Dict] = {}
 
     def parse(self) -> ParsedCodebase:
         """Parse the entire codebase"""
         from .languages import get_all_supported_extensions
+
+        self._pending_function_calls = {}
+        self._pending_class_usages = {}
 
         # Create repository entity
         repo = Repository(
@@ -362,6 +367,9 @@ class CodebaseParser:
     def parse_incremental(self, changed_files: List[str]) -> ParsedCodebase:
         """Parse only the specified changed files."""
         from .languages import get_all_supported_extensions
+
+        self._pending_function_calls = {}
+        self._pending_class_usages = {}
 
         repo = Repository(
             id=self.repo_id,
@@ -478,10 +486,10 @@ class CodebaseParser:
         # Store call information for later resolution
         function_calls = result.get('function_calls', {})
         if function_calls:
-            file_entity._function_calls = function_calls
+            self._pending_function_calls[file_id] = function_calls
         class_usages = result.get('class_usages', {})
         if class_usages:
-            file_entity._class_usages = class_usages
+            self._pending_class_usages[file_id] = class_usages
 
     def _resolve_relationships(self, codebase: ParsedCodebase):
         """Resolve cross-file relationships"""
@@ -532,26 +540,25 @@ class CodebaseParser:
                 codebase.relationships.remove(rel)
 
         # Resolve function calls and class usages
-        for file_entity in codebase.files:
-            if hasattr(file_entity, '_function_calls'):
-                for func_id, calls in file_entity._function_calls.items():
-                    for called_name, line in calls:
-                        # Try to find the called function
-                        if called_name in func_by_name:
-                            for target_func in func_by_name[called_name]:
-                                codebase.add_relationship(
-                                    'CALLS', func_id, target_func.id,
-                                    lineNumbers=str([line])
-                                )
-                                break
-
-            if hasattr(file_entity, '_class_usages'):
-                for func_id, class_names in file_entity._class_usages.items():
-                    for class_name in class_names:
-                        if class_name in class_by_name:
+        for _file_id, function_calls in self._pending_function_calls.items():
+            for func_id, calls in function_calls.items():
+                for called_name, line in calls:
+                    # Try to find the called function
+                    if called_name in func_by_name:
+                        for target_func in func_by_name[called_name]:
                             codebase.add_relationship(
-                                'USES_CLASS', func_id, class_by_name[class_name].id
+                                'CALLS', func_id, target_func.id,
+                                lineNumbers=str([line])
                             )
+                            break
+
+        for _file_id, class_usages in self._pending_class_usages.items():
+            for func_id, class_names in class_usages.items():
+                for class_name in class_names:
+                    if class_name in class_by_name:
+                        codebase.add_relationship(
+                            'USES_CLASS', func_id, class_by_name[class_name].id
+                        )
 
         # Resolve import dependencies between files
         import_to_file: Dict[str, str] = {}
