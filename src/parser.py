@@ -475,6 +475,10 @@ class CodebaseParser:
         for imp in result.get('imports', []):
             codebase.add_relationship('IMPORTS', file_id, imp.id)
 
+        # Add file -> interface relationships
+        for iface in result.get('interfaces', []):
+            codebase.add_relationship('DEFINES_INTERFACE', file_id, iface.id)
+
         # Store call information for later resolution
         function_calls = result.get('function_calls', {})
         if function_calls:
