@@ -68,7 +68,7 @@ class PythonParser(ast.NodeVisitor):
             return None
         try:
             return ast.unparse(annotation)
-        except:
+        except Exception:
             return str(annotation)
 
     def _calculate_complexity(self, node) -> int:
@@ -186,7 +186,7 @@ class PythonParser(ast.NodeVisitor):
             for i, default in enumerate(defaults):
                 try:
                     parameters[offset + i].default_value = ast.unparse(default)
-                except:
+                except Exception:
                     pass
 
         # Determine visibility
