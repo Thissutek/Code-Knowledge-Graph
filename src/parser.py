@@ -3,10 +3,13 @@ Python Code Parser
 Extracts code structure from Python files using AST
 """
 import ast
+import logging
 import os
 import hashlib
 from pathlib import Path
 from typing import List, Dict, Set, Optional, Tuple
+
+_logger = logging.getLogger(__name__)
 from .models import (
     ParsedCodebase, Repository, File, Module, Class, Function,
     Variable, Import, Parameter, Relationship
@@ -404,7 +407,7 @@ class CodebaseParser:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 source_code = f.read()
         except Exception as e:
-            print(f"Error reading {file_path}: {e}")
+            _logger.error("Error reading %s: %s", file_path, e)
             return
 
         # Create file entity
@@ -449,7 +452,7 @@ class CodebaseParser:
 
         # Use language-specific parser
         if parser is None:
-            print(f"No parser available for {file_path}")
+            _logger.warning("No parser available for %s", file_path)
             return
 
         result = parser.parse_file(file_path, source_code)
