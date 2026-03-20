@@ -41,10 +41,6 @@ class HookManager:
         """
         neo4j_uri = neo4j_uri or os.getenv('NEO4J_URI', 'bolt://localhost:7687')
         neo4j_user = neo4j_user or os.getenv('NEO4J_USERNAME', 'neo4j')
-        neo4j_password = neo4j_password or os.getenv('NEO4J_PASSWORD')
-        if not neo4j_password:
-            raise ValueError(
-                "Neo4j password is required. Pass --neo4j-password or set NEO4J_PASSWORD env var.")
 
         repo = Path(repo_path).resolve()
         hooks_dir = repo / '.git' / 'hooks'
@@ -60,7 +56,6 @@ class HookManager:
         for name, value in [('repo_id', repo_id), ('mode', mode),
                             ('neo4j_uri', neo4j_uri),
                             ('neo4j_user', neo4j_user),
-                            ('neo4j_password', neo4j_password),
                             ('code_kag_path', self.code_kag_path)]:
             if not _SAFE_SHELL_VALUE.match(value):
                 raise ValueError(
@@ -77,7 +72,6 @@ class HookManager:
             .replace('{{MODE}}', mode)
             .replace('{{NEO4J_URI}}', neo4j_uri)
             .replace('{{NEO4J_USER}}', neo4j_user)
-            .replace('{{NEO4J_PASSWORD}}', neo4j_password)
         )
         common_dest = hooks_dir / 'code-kag-common.sh'
         common_dest.write_text(common_content)
@@ -146,6 +140,7 @@ fi
 
         print(f"Code-KAG hooks installed in {repo}")
         print(f"  Mode: {mode}, Repo ID: {repo_id}")
+        print("  NOTE: Set NEO4J_PASSWORD in environment before hooks run.")
 
     def uninstall(self, repo_path: str):
         """Remove code-kag hooks from a git repository.
