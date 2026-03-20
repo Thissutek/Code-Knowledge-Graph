@@ -181,9 +181,9 @@ fi
                         shutil.move(str(backup_path), str(hook_path))
                         print(f"  Restored {hook_name} from backup")
 
-            # Clean up any leftover backups
-            if backup_path.exists():
-                backup_path.unlink()
+                    # Remove leftover backup only if we installed it
+                    if backup_path.exists():
+                        backup_path.unlink()
 
         print(f"Code-KAG hooks uninstalled from {repo}")
 
