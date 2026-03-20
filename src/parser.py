@@ -562,20 +562,24 @@ class CodebaseParser:
             # Also add just the filename without path
             import_to_file[file_entity.name.replace('.py', '')] = file_entity.id
 
+        imports_by_file: Dict[str, List] = {}
+        for imp in codebase.imports:
+            prefix = imp.id.split(':')[0]  # file_id is first segment before ':'
+            imports_by_file.setdefault(prefix, []).append(imp)
+
         for file_entity in codebase.files:
-            for imp in codebase.imports:
-                if imp.id.startswith(file_entity.id):
-                    # This import belongs to this file
-                    source_module = imp.source.split('.')[0]
-                    if source_module in import_to_file and import_to_file[source_module] != file_entity.id:
-                        codebase.add_relationship(
-                            'IMPORTS_FROM', file_entity.id, import_to_file[source_module],
-                            symbols=str(imp.imported_symbols)
-                        )
-                        codebase.add_relationship(
-                            'DEPENDS_ON', file_entity.id, import_to_file[source_module],
-                            dependencyType='import'
-                        )
+            for imp in imports_by_file.get(file_entity.id, []):
+                # This import belongs to this file
+                source_module = imp.source.split('.')[0]
+                if source_module in import_to_file and import_to_file[source_module] != file_entity.id:
+                    codebase.add_relationship(
+                        'IMPORTS_FROM', file_entity.id, import_to_file[source_module],
+                        symbols=str(imp.imported_symbols)
+                    )
+                    codebase.add_relationship(
+                        'DEPENDS_ON', file_entity.id, import_to_file[source_module],
+                        dependencyType='import'
+                    )
 
 
 def parse_repository(repo_path: str, repo_id: Optional[str] = None) -> ParsedCodebase:
