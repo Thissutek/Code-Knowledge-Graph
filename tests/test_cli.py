@@ -112,3 +112,30 @@ class TestCLIIndex:
         # so we check for indexing message or connection error
         combined = r.stdout + r.stderr
         assert "Indexing" in combined or "error" in combined.lower() or r.returncode != 0
+
+
+# ── check-staleness ────────────────────────────────────────────────────────
+
+class TestCLICheckStaleness:
+    def test_help_shows_repo_id(self):
+        r = run_cli("check-staleness", "--help")
+        assert "--repo-id" in r.stdout
+        assert "--max-age-hours" in r.stdout
+
+    def test_missing_repo_id_fails(self):
+        r = run_cli("check-staleness", expect_success=False)
+        assert r.returncode != 0
+
+    def test_stale_when_neo4j_unreachable(self):
+        """When Neo4j is unreachable, the command exits non-zero (stale)."""
+        r = subprocess.run(
+            [
+                sys.executable, CLI_PATH, "check-staleness",
+                "--repo-id", "nonexistent",
+                "--neo4j-uri", "bolt://invalid:9999",
+                "--neo4j-password", "x",
+            ],
+            capture_output=True, text=True,
+            env={**os.environ, "PYTHONPATH": str(Path(__file__).parent.parent)},
+        )
+        assert r.returncode != 0
