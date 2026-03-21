@@ -259,6 +259,36 @@ class TestIgnoreDirs:
         assert not any(".git" in p for p in paths)
 
 
+# ── Function ID format ─────────────────────────────────────────────────────
+
+class TestFunctionIdFormat:
+    """Function and class IDs must use relative paths so MCP queries work."""
+
+    def test_function_ids_are_relative(self, sample_repo):
+        parser = CodebaseParser(str(sample_repo), "id-test")
+        codebase = parser.parse()
+        for func in codebase.functions:
+            assert not func.id.startswith('/'), (
+                f"Function ID should be relative, got: {func.id}")
+
+    def test_class_ids_are_relative(self, sample_repo):
+        parser = CodebaseParser(str(sample_repo), "id-test")
+        codebase = parser.parse()
+        for cls in codebase.classes:
+            assert not cls.id.startswith('/'), (
+                f"Class ID should be relative, got: {cls.id}")
+
+    def test_calls_relationship_ids_are_relative(self, sample_repo):
+        parser = CodebaseParser(str(sample_repo), "id-test")
+        codebase = parser.parse()
+        calls = [r for r in codebase.relationships if r.rel_type == "CALLS"]
+        for rel in calls:
+            assert not rel.source_id.startswith('/'), (
+                f"CALLS source should be relative, got: {rel.source_id}")
+            assert not rel.target_id.startswith('/'), (
+                f"CALLS target should be relative, got: {rel.target_id}")
+
+
 # ── Pending dict cleanup ────────────────────────────────────────────────────
 
 class TestPendingDictCleanup:

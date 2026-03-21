@@ -456,7 +456,7 @@ class CodeKAGQuerier:
                 result = session.run("""
                     CALL db.index.fulltext.queryNodes('function_docstring', $searchTerm)
                     YIELD node, score
-                    MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(:File)-[:DEFINES_FUNCTION|HAS_METHOD*]->(node)
+                    MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(:File)-[:DEFINES_FUNCTION|DEFINES_CLASS]->()-[:HAS_METHOD*0..1]->(node)
                     RETURN node.id AS id, node.name AS name, node.signature AS signature,
                            node.docstring AS docstring, score
                     ORDER BY score DESC
@@ -502,7 +502,7 @@ class CodeKAGQuerier:
         with self.driver.session() as session:
             if repo_id:
                 result = session.run("""
-                    MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(file:File)-[:DEFINES_FUNCTION|HAS_METHOD*]->(f:Function {name: $name})
+                    MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(file:File)-[:DEFINES_FUNCTION|DEFINES_CLASS]->()-[:HAS_METHOD*0..1]->(f:Function {name: $name})
                     OPTIONAL MATCH (class:Class)-[:HAS_METHOD]->(f)
                     RETURN f.id AS id, f.name AS name, f.signature AS signature,
                            f.docstring AS docstring, f.startLine AS startLine,
@@ -553,7 +553,7 @@ class CodeKAGQuerier:
         with self.driver.session() as session:
             if repo_id:
                 result = session.run(f"""
-                    MATCH (r:Repository {{id: $repo_id}})-[:CONTAINS_FILE]->(:File)-[:DEFINES_FUNCTION|HAS_METHOD*]->(f:Function {{id: $function_id}})
+                    MATCH (r:Repository {{id: $repo_id}})-[:CONTAINS_FILE]->(:File)-[:DEFINES_FUNCTION|DEFINES_CLASS]->()-[:HAS_METHOD*0..1]->(f:Function {{id: $function_id}})
                     WITH f
                     MATCH path = (f)-[:CALLS*1..{safe_depth}]->(called:Function)
                     WITH f, collect(DISTINCT {{
@@ -629,12 +629,12 @@ class CodeKAGQuerier:
         with self.driver.session() as session:
             if repo_id:
                 result = session.run("""
-                    MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(:File)-[:DEFINES_FUNCTION|HAS_METHOD*]->(f:Function {id: $function_id})
+                    MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(:File)-[:DEFINES_FUNCTION|DEFINES_CLASS]->()-[:HAS_METHOD*0..1]->(f:Function {id: $function_id})
                     OPTIONAL MATCH (f)-[:CALLS]->(called:Function)
                     OPTIONAL MATCH (f)-[:USES_CLASS]->(usedClass:Class)
                     WITH f, collect(DISTINCT called) AS fCalls, collect(DISTINCT usedClass) AS fClasses
                     WHERE size(fCalls) > 0 OR size(fClasses) > 0
-                    MATCH (r2:Repository {id: $repo_id})-[:CONTAINS_FILE]->(:File)-[:DEFINES_FUNCTION|HAS_METHOD*]->(other:Function)
+                    MATCH (r2:Repository {id: $repo_id})-[:CONTAINS_FILE]->(:File)-[:DEFINES_FUNCTION|DEFINES_CLASS]->()-[:HAS_METHOD*0..1]->(other:Function)
                     WHERE other <> f
                     OPTIONAL MATCH (other)-[:CALLS]->(otherCalled:Function)
                     WHERE otherCalled IN fCalls
@@ -687,7 +687,7 @@ class CodeKAGQuerier:
             if repo_id:
                 result = session.run("""
                     // Try to find as function first, scoped to repo
-                    OPTIONAL MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(file:File)-[:DEFINES_FUNCTION|HAS_METHOD*]->(f:Function {id: $entity_id})
+                    OPTIONAL MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(file:File)-[:DEFINES_FUNCTION|DEFINES_CLASS]->()-[:HAS_METHOD*0..1]->(f:Function {id: $entity_id})
                     OPTIONAL MATCH (class:Class)-[:HAS_METHOD]->(f)
                     OPTIONAL MATCH (f)-[:CALLS]->(called:Function)
                     OPTIONAL MATCH (caller:Function)-[:CALLS]->(f)
@@ -779,7 +779,7 @@ class CodeKAGQuerier:
             if repo_id:
                 # Search functions scoped to repo
                 func_result = session.run("""
-                    MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(file:File)-[:DEFINES_FUNCTION|HAS_METHOD*]->(f:Function)
+                    MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(file:File)-[:DEFINES_FUNCTION|DEFINES_CLASS]->()-[:HAS_METHOD*0..1]->(f:Function)
                     WHERE f.name CONTAINS $searchTerm
                        OR f.docstring CONTAINS $searchTerm
                        OR f.signature CONTAINS $searchTerm
@@ -820,7 +820,7 @@ class CodeKAGQuerier:
                     WHERE f.name CONTAINS $searchTerm
                        OR f.docstring CONTAINS $searchTerm
                        OR f.signature CONTAINS $searchTerm
-                    OPTIONAL MATCH (file:File)-[:DEFINES_FUNCTION|HAS_METHOD*]->(f)
+                    OPTIONAL MATCH (file:File)-[:DEFINES_FUNCTION|DEFINES_CLASS]->()-[:HAS_METHOD*0..1]->(f)
                     RETURN 'function' AS type, f.id AS id, f.name AS name,
                            f.docstring AS description, file.path AS location,
                            f.startLine AS startLine

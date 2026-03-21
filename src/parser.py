@@ -463,7 +463,7 @@ class CodebaseParser:
             _logger.warning("No parser available for %s", file_path)
             return
 
-        result = parser.parse_file(file_path, source_code)
+        result = parser.parse_file(rel_path, source_code)
 
         # Add parsed entities
         codebase.classes.extend(result.get('classes', []))
