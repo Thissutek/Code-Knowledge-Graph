@@ -38,6 +38,11 @@ class JavaLanguageParser(TreeSitterBaseParser):
             self._java_parser = Parser(lang)
         return self._java_parser
 
+    def _class_hierarchy(self, class_id: str) -> str:
+        """Extract class name chain from a class ID (strips file path prefix)."""
+        parts = class_id.split(':')
+        return ':'.join(parts[1:])
+
     def parse_file(self, file_path: Path, source_code: str) -> Dict:
         parser = self._ensure_parser()
         source_bytes = source_code.encode('utf-8')
@@ -108,7 +113,10 @@ class JavaLanguageParser(TreeSitterBaseParser):
         if not name_node:
             return
         name = self._extract_text(name_node, source_bytes)
-        class_id = self._make_id(fp, name)
+        if parent_class:
+            class_id = self._make_id(fp, self._class_hierarchy(parent_class), name)
+        else:
+            class_id = self._make_id(fp, name)
 
         modifiers = self._extract_modifiers(node, source_bytes)
         is_abstract = 'abstract' in modifiers
@@ -193,7 +201,10 @@ class JavaLanguageParser(TreeSitterBaseParser):
         if not name_node:
             return
         name = self._extract_text(name_node, source_bytes)
-        class_id = self._make_id(fp, name)
+        if parent_class:
+            class_id = self._make_id(fp, self._class_hierarchy(parent_class), name)
+        else:
+            class_id = self._make_id(fp, name)
 
         decorators = self._extract_annotations(node, source_bytes)
 
@@ -225,7 +236,7 @@ class JavaLanguageParser(TreeSitterBaseParser):
         is_method = current_class is not None
 
         if is_method:
-            func_id = self._make_id(fp, current_class.split(':')[-1], name)
+            func_id = self._make_id(fp, self._class_hierarchy(current_class), name)
         else:
             func_id = self._make_id(fp, name)
 
@@ -320,7 +331,7 @@ class JavaLanguageParser(TreeSitterBaseParser):
             name = self._extract_text(name_node, source_bytes)
 
             if current_class:
-                var_id = self._make_id(fp, current_class.split(':')[-1], name)
+                var_id = self._make_id(fp, self._class_hierarchy(current_class), name)
             else:
                 var_id = self._make_id(fp, name)
 
