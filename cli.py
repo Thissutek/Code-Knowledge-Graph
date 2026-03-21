@@ -131,6 +131,47 @@ def cmd_stats(args):
         q.close()
 
 
+def cmd_check_staleness(args):
+    """Check if a repository's index is stale.
+
+    Exits with code 0 if the repo was indexed within --max-age-hours.
+    Exits with code 1 if the index is stale or the repo has never been indexed.
+    """
+    from src.neo4j_ingester import CodeKAGQuerier
+
+    q = CodeKAGQuerier(args.neo4j_uri, args.neo4j_user, args.neo4j_password)
+    q.connect()
+
+    try:
+        with q.driver.session() as session:
+            result = session.run("""
+                MATCH (r:Repository {id: $repo_id})
+                RETURN r.lastIndexed AS lastIndexed
+            """, repo_id=args.repo_id)
+            record = result.single()
+            if not record or record["lastIndexed"] is None:
+                print(f"[code-kag] Repository '{args.repo_id}' has not been indexed.", file=sys.stderr)
+                sys.exit(1)
+
+            last_indexed = record["lastIndexed"]
+            # Neo4j datetime objects support .to_native() -> datetime
+            if hasattr(last_indexed, 'to_native'):
+                last_indexed = last_indexed.to_native()
+
+            import datetime as dt
+            now = dt.datetime.now(tz=last_indexed.tzinfo)
+            age_hours = (now - last_indexed).total_seconds() / 3600
+
+            if age_hours > args.max_age_hours:
+                print(f"[code-kag] Index is stale ({age_hours:.1f}h old, limit {args.max_age_hours}h).", file=sys.stderr)
+                sys.exit(1)
+
+            print(f"[code-kag] Index is fresh ({age_hours:.1f}h old).", file=sys.stderr)
+            sys.exit(0)
+    finally:
+        q.close()
+
+
 def cmd_hooks_install(args):
     """Install code-kag git hooks into a repository"""
     from src.hooks import HookManager
@@ -233,6 +274,14 @@ Examples:
     # Stats command
     stats_parser = subparsers.add_parser('stats', help='Show statistics')
     stats_parser.set_defaults(func=cmd_stats)
+
+    # Check-staleness command
+    stale_parser = subparsers.add_parser('check-staleness',
+                                         help='Check if a repository index is stale (exit 0 = fresh, 1 = stale)')
+    stale_parser.add_argument('--repo-id', required=True, help='Repository ID to check')
+    stale_parser.add_argument('--max-age-hours', type=float, default=24.0,
+                              help='Maximum acceptable index age in hours (default: 24)')
+    stale_parser.set_defaults(func=cmd_check_staleness)
 
     # Hooks command group
     hooks_parser = subparsers.add_parser('hooks', help='Manage git hooks')
