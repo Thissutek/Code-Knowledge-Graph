@@ -1176,9 +1176,10 @@ class CodeKAGQuerier:
         Performs forward traversal along CALLS edges up to *max_depth* hops.
         Returns each affected function with its shortest distance from the start.
         """
+        depth = max(1, int(max_depth))
         with self.driver.session() as session:
-            result = session.run("""
-                MATCH path = (start:Function {id: $function_id})-[:CALLS*1..$max_depth]->(affected:Function)
+            result = session.run(f"""
+                MATCH path = (start:Function {{id: $function_id}})-[:CALLS*1..{depth}]->(affected:Function)
                 WHERE affected.id <> $function_id
                 WITH affected, min(length(path)) AS distance
                 OPTIONAL MATCH (file:File)-[:DEFINES_FUNCTION|DEFINES_CLASS]->()-[:HAS_METHOD*0..1]->(affected)
@@ -1187,7 +1188,7 @@ class CodeKAGQuerier:
                        distance
                 ORDER BY distance, affected.name
                 LIMIT $limit
-            """, function_id=function_id, max_depth=max_depth, limit=limit)
+            """, function_id=function_id, limit=limit)
             return [dict(record) for record in result]
 
     def find_circular_dependencies(self, min_cycle_length: int = 2,
@@ -1198,28 +1199,30 @@ class CodeKAGQuerier:
 
         Returns each unique cycle as a list of function IDs.
         """
+        # Cypher does not support parameterised range quantifiers, so inline the values.
+        min_len = max(2, int(min_cycle_length))
+        max_len = max(min_len, int(max_cycle_length))
         with self.driver.session() as session:
             if repo_id:
-                result = session.run("""
-                    MATCH path = (a:Function)-[:CALLS*$min_len..$max_len]->(a)
-                    WHERE (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(:File)
-                          -[:DEFINES_FUNCTION|DEFINES_CLASS]->()-[:HAS_METHOD*0..1]->(a)
+                result = session.run(f"""
+                    MATCH (:Repository {{id: $repo_id}})-[:CONTAINS_FILE]->(:File)
+                          -[:DEFINES_FUNCTION|DEFINES_CLASS]->()-[:HAS_METHOD*0..1]->(a:Function)
+                    MATCH path = (a)-[:CALLS*{min_len}..{max_len}]->(a)
                     WITH [n IN nodes(path) | n.id] AS cycle,
                          length(path) AS cycle_length
                     RETURN DISTINCT cycle, cycle_length
                     ORDER BY cycle_length
                     LIMIT $limit
-                """, min_len=min_cycle_length, max_len=max_cycle_length,
-                     repo_id=repo_id, limit=limit)
+                """, repo_id=repo_id, limit=limit)
             else:
-                result = session.run("""
-                    MATCH path = (a:Function)-[:CALLS*$min_len..$max_len]->(a)
+                result = session.run(f"""
+                    MATCH path = (a:Function)-[:CALLS*{min_len}..{max_len}]->(a)
                     WITH [n IN nodes(path) | n.id] AS cycle,
                          length(path) AS cycle_length
                     RETURN DISTINCT cycle, cycle_length
                     ORDER BY cycle_length
                     LIMIT $limit
-                """, min_len=min_cycle_length, max_len=max_cycle_length, limit=limit)
+                """, limit=limit)
             return [dict(record) for record in result]
 
     def get_complexity_hotspots(self, repo_id: str = None, limit: int = 20) -> List[Dict]:
