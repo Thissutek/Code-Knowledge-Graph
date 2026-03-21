@@ -346,7 +346,8 @@ TOOLS = [
         name="find_entry_points",
         description="""Find potential entry points in the codebase.
         Returns functions that are not called by other functions (top-level entry points).
-        Useful for understanding where code execution might begin.""",
+        Useful for understanding where code execution might begin.
+        By default, test files are excluded to reduce noise.""",
         inputSchema={
             "type": "object",
             "properties": {
@@ -358,6 +359,15 @@ TOOLS = [
                     "type": "integer",
                     "default": 20,
                     "description": "Maximum number of entry points to return"
+                },
+                "exclude_test_files": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Exclude functions in test files (files matching test_ or _test patterns). Defaults to true."
+                },
+                "path_prefix": {
+                    "type": "string",
+                    "description": "Optional file path prefix to filter results (e.g. 'cli' or 'src/main')"
                 }
             }
         }
@@ -620,29 +630,42 @@ async def handle_find_entry_points(arguments: Dict[str, Any]) -> str:
     q = get_querier()
     limit = _parse_limit(arguments.get("limit", 20), default=20)
     repo_id = arguments.get("repo_id")
+    exclude_test_files = arguments.get("exclude_test_files", True)
+    path_prefix = arguments.get("path_prefix", "")
+
+    # Build optional WHERE clauses for test-file exclusion and path prefix
+    test_filter = "AND NOT (file.path CONTAINS '/test' OR file.path CONTAINS 'test_' OR file.path ENDS WITH '_test.py')" if exclude_test_files else ""
+    prefix_filter = "AND file.path CONTAINS $path_prefix" if path_prefix else ""
 
     with q.driver.session() as session:
         if repo_id:
-            result = session.run("""
-                MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(file:File)-[:DEFINES_FUNCTION]->(f:Function)
+            result = session.run(f"""
+                MATCH (r:Repository {{id: $repo_id}})-[:CONTAINS_FILE]->(file:File)-[:DEFINES_FUNCTION]->(f:Function)
                 WHERE NOT ()-[:CALLS]->(f)
                 AND NOT f.name STARTS WITH '_'
                 AND f.name <> '__init__'
+                {test_filter}
+                {prefix_filter}
                 RETURN f.id AS id, f.name AS name, f.signature AS signature,
                        file.path AS filePath
                 LIMIT $limit
-            """, limit=limit, repo_id=repo_id)
+            """, limit=limit, repo_id=repo_id, path_prefix=path_prefix)
         else:
-            result = session.run("""
+            result = session.run(f"""
                 MATCH (f:Function)
                 WHERE NOT ()-[:CALLS]->(f)
                 AND NOT f.name STARTS WITH '_'
                 AND f.name <> '__init__'
                 OPTIONAL MATCH (file:File)-[:DEFINES_FUNCTION]->(f)
+                WITH f, file
+                WHERE file IS NULL
+                   OR (true
+                       {test_filter}
+                       {prefix_filter})
                 RETURN f.id AS id, f.name AS name, f.signature AS signature,
                        file.path AS filePath
                 LIMIT $limit
-            """, limit=limit)
+            """, limit=limit, path_prefix=path_prefix)
         results = [dict(r) for r in result]
 
     return json.dumps({"entry_points": results}, indent=2)

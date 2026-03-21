@@ -570,3 +570,43 @@ class TestQuerierSemanticSearch:
 
         result = q.semantic_code_search("foo", limit=5)
         assert len(result) <= 5
+
+
+# ── handle_find_entry_points (filter logic) ────────────────────────────────
+
+class TestFindEntryPointsFilters:
+    """Test that handle_find_entry_points applies the correct Cypher filters."""
+
+    def _run_handler(self, arguments):
+        import asyncio
+        from unittest.mock import patch, MagicMock
+        from src.mcp_server import handle_find_entry_points
+
+        q = _make_querier()
+        mock_session = MagicMock()
+        mock_result = MagicMock()
+        mock_result.__iter__ = MagicMock(return_value=iter([]))
+        mock_session.run.return_value = mock_result
+        q.driver.session.return_value.__enter__ = MagicMock(return_value=mock_session)
+        q.driver.session.return_value.__exit__ = MagicMock(return_value=False)
+
+        with patch("src.mcp_server.get_querier", return_value=q):
+            asyncio.run(handle_find_entry_points(arguments))
+        return mock_session.run.call_args[0][0]  # the Cypher query string
+
+    def test_default_excludes_test_files(self):
+        query = self._run_handler({})
+        assert "test" in query.lower()
+
+    def test_exclude_test_files_false_omits_filter(self):
+        query = self._run_handler({"exclude_test_files": False})
+        # The test-exclusion clause should be absent
+        assert "CONTAINS '/test'" not in query
+
+    def test_path_prefix_added_when_provided(self):
+        query = self._run_handler({"path_prefix": "cli"})
+        assert "$path_prefix" in query
+
+    def test_path_prefix_absent_when_empty(self):
+        query = self._run_handler({"path_prefix": ""})
+        assert "$path_prefix" not in query
