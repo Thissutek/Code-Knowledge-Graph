@@ -398,6 +398,27 @@ TOOLS = [
         }
     ),
     Tool(
+        name="get_tests_for_function",
+        description="""Get test functions that test a specific function.
+        Traverses TESTS relationships (created during indexing via naming convention matching)
+        to find test functions linked to the given implementation function.
+        Useful for impact analysis: understanding which tests cover a function you want to change.""",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "function_id": {
+                    "type": "string",
+                    "description": "ID of the implementation function to find tests for"
+                },
+                "repo_id": {
+                    "type": "string",
+                    "description": "Optional repository ID to scope results to a specific project"
+                }
+            },
+            "required": ["function_id"]
+        }
+    ),
+    Tool(
         name="health_check",
         description="""Check the health of the Code-KAG system.
         Returns Neo4j connectivity status, node/relationship counts,
@@ -876,6 +897,16 @@ async def handle_remove_repository(arguments: Dict[str, Any]) -> str:
     return json.dumps({"success": False, "message": f"Repository '{repo_id}' not found"})
 
 
+async def handle_get_tests_for_function(arguments: Dict[str, Any]) -> str:
+    """Get test functions that test a specific function"""
+    q = get_querier()
+    function_id = arguments["function_id"]
+    repo_id = arguments.get("repo_id")
+
+    results = q.get_tests_for_function(function_id, repo_id=repo_id)
+    return json.dumps({"function_id": function_id, "tests": results, "count": len(results)}, indent=2)
+
+
 # Tool handler mapping
 TOOL_HANDLERS = {
     "search_code": handle_search_code,
@@ -890,6 +921,7 @@ TOOL_HANDLERS = {
     "index_repository": handle_index_repository,
     "find_entry_points": handle_find_entry_points,
     "find_high_complexity_functions": handle_find_high_complexity,
+    "get_tests_for_function": handle_get_tests_for_function,
     "health_check": handle_health_check,
     "get_graph_stats": handle_get_graph_stats,
     "list_repositories": handle_list_repositories,

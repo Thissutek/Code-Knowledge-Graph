@@ -178,6 +178,9 @@ class Neo4jIngester:
             # Create relationships
             self._ingest_relationships(session, codebase)
 
+            # Link test functions to the implementations they test
+            self._link_tests_to_implementations(session, codebase.repository.id)
+
         stats = codebase.get_stats()
         _logger.info("Ingestion complete: %s", stats)
 
@@ -203,6 +206,10 @@ class Neo4jIngester:
             self._ingest_imports(session, codebase)
             self._ingest_interfaces(session, codebase)
             self._ingest_relationships(session, codebase)
+
+            # Re-link test↔implementation relationships for the whole repo
+            # (changed files may affect matches across the entire codebase)
+            self._link_tests_to_implementations(session, repo_id)
 
         stats = codebase.get_stats()
         _logger.info("Incremental ingestion complete for %d file(s): %s", len(changed_files), stats)
@@ -423,6 +430,36 @@ class Neo4jIngester:
                 session.run(query, records=records)
             except Exception as e:
                 _logger.error("Error creating %s relationships: %s", rel_type, e)
+
+    def _link_tests_to_implementations(self, session, repo_id: str):
+        """Create TESTS relationships between test functions and the functions they test.
+
+        Matching strategy: strip the leading `test_` (or `test`) prefix from a
+        test function's name to derive the candidate implementation name, then
+        look for a Function with that name in the same repository.  Only creates
+        the edge when exactly one implementation candidate exists to avoid false
+        positives on ambiguous names.
+        """
+        session.run("""
+            MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(testFile:File)
+                  -[:DEFINES_FUNCTION|DEFINES_CLASS]->()-[:HAS_METHOD*0..1]->(test:Function)
+            WHERE (testFile.path CONTAINS '/test' OR testFile.path CONTAINS 'test_'
+                   OR testFile.path ENDS WITH '_test.py')
+              AND (test.name STARTS WITH 'test_' OR test.name STARTS WITH 'test')
+            WITH test,
+                 CASE
+                   WHEN test.name STARTS WITH 'test_' THEN substring(test.name, 5)
+                   ELSE substring(test.name, 4)
+                 END AS implName
+            WHERE size(implName) > 0
+            MATCH (r2:Repository {id: $repo_id})-[:CONTAINS_FILE]->(implFile:File)
+                  -[:DEFINES_FUNCTION|DEFINES_CLASS]->()-[:HAS_METHOD*0..1]->(impl:Function {name: implName})
+            WHERE NOT (implFile.path CONTAINS '/test' OR implFile.path CONTAINS 'test_'
+                       OR implFile.path ENDS WITH '_test.py')
+              AND impl.id <> test.id
+            MERGE (test)-[:TESTS]->(impl)
+        """, repo_id=repo_id)
+        _logger.info("Linked test functions to implementations for repository: %s", repo_id)
 
 
 class CodeKAGQuerier:
@@ -914,6 +951,28 @@ class CodeKAGQuerier:
         ingester.driver = self.driver
         ingester.clear_repository(repo_id)
         return True
+
+    def get_tests_for_function(self, function_id: str, repo_id: str = None) -> List[Dict]:
+        """Get test functions that test the given function (reverse TESTS traversal)."""
+        with self.driver.session() as session:
+            if repo_id:
+                result = session.run("""
+                    MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(testFile:File)
+                          -[:DEFINES_FUNCTION|DEFINES_CLASS]->()-[:HAS_METHOD*0..1]->(test:Function)
+                    WHERE (test)-[:TESTS]->(:Function {id: $function_id})
+                    RETURN test.id AS id, test.name AS name,
+                           test.signature AS signature, testFile.path AS filePath,
+                           test.startLine AS startLine
+                """, function_id=function_id, repo_id=repo_id)
+            else:
+                result = session.run("""
+                    MATCH (test:Function)-[:TESTS]->(:Function {id: $function_id})
+                    OPTIONAL MATCH (testFile:File)-[:DEFINES_FUNCTION|DEFINES_CLASS]->()-[:HAS_METHOD*0..1]->(test)
+                    RETURN test.id AS id, test.name AS name,
+                           test.signature AS signature, testFile.path AS filePath,
+                           test.startLine AS startLine
+                """, function_id=function_id)
+            return [dict(record) for record in result]
 
 
 def ingest_repository(repo_path: str, repo_id: str = None, neo4j_uri: str = None,
