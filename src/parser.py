@@ -550,6 +550,7 @@ class CodebaseParser:
         for _file_id, function_calls in self._pending_function_calls.items():
             for func_id, calls in function_calls.items():
                 for called_name, line in calls:
+                    # Try to find the called function
                     if called_name in func_by_name:
                         for target_func in func_by_name[called_name]:
                             codebase.add_relationship(
