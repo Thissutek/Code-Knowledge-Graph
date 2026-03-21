@@ -10,6 +10,45 @@ _logger = logging.getLogger(__name__)
 from neo4j import GraphDatabase
 from .models import ParsedCodebase, Relationship
 
+# ---------------------------------------------------------------------------
+# Embedding support (sentence-transformers, optional)
+# ---------------------------------------------------------------------------
+
+_embedding_model = None  # lazy-loaded on first use
+
+
+def _get_embedding_model():
+    """Return the shared SentenceTransformer model, loading it on first call.
+
+    Returns None if sentence-transformers is not installed, so callers can
+    degrade gracefully when the dependency is absent.
+    """
+    global _embedding_model
+    if _embedding_model is not None:
+        return _embedding_model
+    try:
+        from sentence_transformers import SentenceTransformer
+        _embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+        _logger.info("Loaded embedding model: all-MiniLM-L6-v2")
+    except ImportError:
+        _logger.warning(
+            "sentence-transformers not installed. Semantic search will fall back to "
+            "substring matching. Install with: pip install sentence-transformers"
+        )
+    return _embedding_model
+
+
+def _embed_texts(texts: list) -> list:
+    """Return list of embedding vectors (as Python lists) for the given texts.
+
+    Returns an empty list if the model is unavailable.
+    """
+    model = _get_embedding_model()
+    if model is None or not texts:
+        return []
+    vectors = model.encode(texts, show_progress_bar=False)
+    return [v.tolist() for v in vectors]
+
 
 class Neo4jIngester:
     """Handles ingestion of parsed code into Neo4j"""
@@ -61,6 +100,18 @@ class Neo4jIngester:
             "CREATE FULLTEXT INDEX function_docstring IF NOT EXISTS FOR (f:Function) ON EACH [f.docstring]",
             "CREATE FULLTEXT INDEX class_docstring IF NOT EXISTS FOR (c:Class) ON EACH [c.docstring]",
         ]
+
+        vector_indexes = [
+            # 384-dim vectors from all-MiniLM-L6-v2
+            """CREATE VECTOR INDEX function_embedding IF NOT EXISTS
+               FOR (f:Function) ON (f.embedding)
+               OPTIONS {indexConfig: {`vector.dimensions`: 384,
+                                      `vector.similarity_function`: 'cosine'}}""",
+            """CREATE VECTOR INDEX class_embedding IF NOT EXISTS
+               FOR (c:Class) ON (c.embedding)
+               OPTIONS {indexConfig: {`vector.dimensions`: 384,
+                                      `vector.similarity_function`: 'cosine'}}""",
+        ]
         
         with self.driver.session() as session:
             for constraint in constraints:
@@ -76,6 +127,13 @@ class Neo4jIngester:
                 except Exception as e:
                     if "already exists" not in str(e).lower():
                         _logger.warning("Warning creating index: %s", e)
+
+            for vi in vector_indexes:
+                try:
+                    session.run(vi)
+                except Exception as e:
+                    if "already exists" not in str(e).lower():
+                        _logger.warning("Warning creating vector index: %s", e)
 
         _logger.info("Constraints and indexes created")
     
@@ -145,24 +203,33 @@ class Neo4jIngester:
             """, repo_id=repo_id)
         _logger.info("Cleared existing data for repository: %s", repo_id)
     
-    def ingest(self, codebase: ParsedCodebase, clear_existing: bool = True):
-        """Ingest a parsed codebase into Neo4j"""
+    def ingest(self, codebase: ParsedCodebase, clear_existing: bool = True,
+               skip_embeddings: bool = False):
+        """Ingest a parsed codebase into Neo4j.
+
+        Args:
+            skip_embeddings: When True, skip vector embedding generation.
+                Useful for fast indexing of large repos where semantic
+                search is not needed.
+        """
         if clear_existing:
             self.clear_repository(codebase.repository.id)
-        
+
+        self._skip_embeddings = skip_embeddings
+
         with self.driver.session() as session:
             # Ingest repository
             self._ingest_repository(session, codebase)
-            
+
             # Ingest files
             self._ingest_files(session, codebase)
-            
+
             # Ingest modules
             self._ingest_modules(session, codebase)
-            
+
             # Ingest classes
             self._ingest_classes(session, codebase)
-            
+
             # Ingest functions
             self._ingest_functions(session, codebase)
             
@@ -184,12 +251,14 @@ class Neo4jIngester:
         stats = codebase.get_stats()
         _logger.info("Ingestion complete: %s", stats)
 
-    def ingest_incremental(self, codebase: ParsedCodebase, changed_files: List[str]):
+    def ingest_incremental(self, codebase: ParsedCodebase, changed_files: List[str],
+                           skip_embeddings: bool = False):
         """Incrementally ingest only changed files.
 
         Deletes old nodes for the changed files and inserts the new parsed data.
         """
         repo_id = codebase.repository.id
+        self._skip_embeddings = skip_embeddings
 
         with self.driver.session() as session:
             # Delete existing entities for each changed file
@@ -283,6 +352,18 @@ class Neo4jIngester:
             return
 
         records = [c.to_dict() for c in codebase.classes]
+
+        # Generate embeddings unless opted out
+        if not getattr(self, '_skip_embeddings', False):
+            texts = [
+                ' '.join(filter(None, [c.name, c.docstring or '']))
+                for c in codebase.classes
+            ]
+            vectors = _embed_texts(texts)
+            if vectors:
+                for record, vector in zip(records, vectors):
+                    record['embedding'] = vector
+
         session.run("""
             UNWIND $records AS record
             MERGE (c:Class {id: record.id})
@@ -293,14 +374,32 @@ class Neo4jIngester:
                 c.isAbstract = record.isAbstract,
                 c.decorators = record.decorators,
                 c.languageType = record.languageType
+            WITH c, record
+            CALL {
+                WITH c, record
+                WITH c, record WHERE record.embedding IS NOT NULL
+                CALL db.create.setNodeVectorProperty(c, 'embedding', record.embedding)
+            }
         """, records=records)
     
     def _ingest_functions(self, session, codebase: ParsedCodebase):
         """Ingest function nodes in batch"""
         if not codebase.functions:
             return
-        
+
         records = [f.to_dict() for f in codebase.functions]
+
+        # Generate embeddings unless opted out
+        if not getattr(self, '_skip_embeddings', False):
+            texts = [
+                ' '.join(filter(None, [f.name, f.signature or '', f.docstring or '']))
+                for f in codebase.functions
+            ]
+            vectors = _embed_texts(texts)
+            if vectors:
+                for record, vector in zip(records, vectors):
+                    record['embedding'] = vector
+
         session.run("""
             UNWIND $records AS record
             MERGE (f:Function {id: record.id})
@@ -314,6 +413,12 @@ class Neo4jIngester:
                 f.returnType = record.returnType,
                 f.complexity = record.complexity,
                 f.parameters = record.parameters
+            WITH f, record
+            CALL {
+                WITH f, record
+                WITH f, record WHERE record.embedding IS NOT NULL
+                CALL db.create.setNodeVectorProperty(f, 'embedding', record.embedding)
+            }
         """, records=records)
     
     def _ingest_variables(self, session, codebase: ParsedCodebase):
@@ -830,15 +935,70 @@ class CodeKAGQuerier:
             return {}
     
     def semantic_code_search(self, query: str, limit: int = 20, repo_id: str = None) -> List[Dict]:
-        """
-        Semantic search across all code entities.
+        """Semantic search across all code entities.
+
+        Uses vector embeddings (cosine similarity via Neo4j vector index) when
+        sentence-transformers is installed and embeddings were generated during
+        indexing.  Falls back to substring matching otherwise.
+
         Returns functions, classes, and files matching the query.
         """
+        embedding = _embed_texts([query])
+        if embedding:
+            return self._semantic_search_vector(query, embedding[0], limit, repo_id)
+        return self._semantic_search_substring(query, limit, repo_id)
+
+    def _semantic_search_vector(self, query: str, embedding: list,
+                                 limit: int, repo_id: str = None) -> List[Dict]:
+        """Vector-based semantic search using Neo4j vector index."""
+        results = []
+        with self.driver.session() as session:
+            # Search functions
+            try:
+                func_result = session.run("""
+                    CALL db.index.vector.queryNodes('function_embedding', $limit, $embedding)
+                    YIELD node AS f, score
+                    WHERE score > 0.3
+                    OPTIONAL MATCH (file:File)-[:DEFINES_FUNCTION|DEFINES_CLASS]->()-[:HAS_METHOD*0..1]->(f)
+                    RETURN 'function' AS type, f.id AS id, f.name AS name,
+                           f.docstring AS description, file.path AS location,
+                           f.startLine AS startLine, score
+                    ORDER BY score DESC
+                    LIMIT $limit
+                """, embedding=embedding, limit=limit)
+                results.extend([dict(r) for r in func_result])
+            except Exception as e:
+                _logger.debug("Vector function search failed, will use substring: %s", e)
+                return self._semantic_search_substring(query, limit, repo_id)
+
+            # Search classes
+            try:
+                class_result = session.run("""
+                    CALL db.index.vector.queryNodes('class_embedding', $limit, $embedding)
+                    YIELD node AS c, score
+                    WHERE score > 0.3
+                    OPTIONAL MATCH (file:File)-[:DEFINES_CLASS]->(c)
+                    RETURN 'class' AS type, c.id AS id, c.name AS name,
+                           c.docstring AS description, file.path AS location,
+                           c.startLine AS startLine, score
+                    ORDER BY score DESC
+                    LIMIT $limit
+                """, embedding=embedding, limit=limit)
+                results.extend([dict(r) for r in class_result])
+            except Exception as e:
+                _logger.debug("Vector class search failed: %s", e)
+
+        # Sort combined results by score (desc) and trim to limit
+        results.sort(key=lambda r: r.get('score', 0), reverse=True)
+        return results[:limit]
+
+    def _semantic_search_substring(self, query: str, limit: int,
+                                    repo_id: str = None) -> List[Dict]:
+        """Substring-based search (fallback when embeddings unavailable)."""
         results = []
 
         with self.driver.session() as session:
             if repo_id:
-                # Search functions scoped to repo
                 func_result = session.run("""
                     MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(file:File)-[:DEFINES_FUNCTION|DEFINES_CLASS]->()-[:HAS_METHOD*0..1]->(f:Function)
                     WHERE f.name CONTAINS $searchTerm
@@ -851,7 +1011,6 @@ class CodeKAGQuerier:
                 """, searchTerm=query, limit=limit, repo_id=repo_id)
                 results.extend([dict(r) for r in func_result])
 
-                # Search classes scoped to repo
                 class_result = session.run("""
                     MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(file:File)-[:DEFINES_CLASS]->(c:Class)
                     WHERE c.name CONTAINS $searchTerm
@@ -863,7 +1022,6 @@ class CodeKAGQuerier:
                 """, searchTerm=query, limit=limit, repo_id=repo_id)
                 results.extend([dict(r) for r in class_result])
 
-                # Search files scoped to repo
                 file_result = session.run("""
                     MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(f:File)
                     WHERE f.name CONTAINS $searchTerm
@@ -875,7 +1033,6 @@ class CodeKAGQuerier:
                 """, searchTerm=query, limit=limit, repo_id=repo_id)
                 results.extend([dict(r) for r in file_result])
             else:
-                # Search functions
                 func_result = session.run("""
                     MATCH (f:Function)
                     WHERE f.name CONTAINS $searchTerm
@@ -889,7 +1046,6 @@ class CodeKAGQuerier:
                 """, searchTerm=query, limit=limit)
                 results.extend([dict(r) for r in func_result])
 
-                # Search classes
                 class_result = session.run("""
                     MATCH (c:Class)
                     WHERE c.name CONTAINS $searchTerm
@@ -902,7 +1058,6 @@ class CodeKAGQuerier:
                 """, searchTerm=query, limit=limit)
                 results.extend([dict(r) for r in class_result])
 
-                # Search files
                 file_result = session.run("""
                     MATCH (f:File)
                     WHERE f.name CONTAINS $searchTerm
@@ -978,7 +1133,8 @@ class CodeKAGQuerier:
 def ingest_repository(repo_path: str, repo_id: str = None, neo4j_uri: str = None,
                       neo4j_user: str = None, neo4j_password: str = None,
                       incremental: bool = False,
-                      changed_files: Optional[List[str]] = None) -> Dict:
+                      changed_files: Optional[List[str]] = None,
+                      skip_embeddings: bool = False) -> Dict:
     """
     Convenience function to parse and ingest a repository.
     Returns statistics about the ingestion.
@@ -1004,9 +1160,10 @@ def ingest_repository(repo_path: str, repo_id: str = None, neo4j_uri: str = None
     try:
         ingester.create_constraints()
         if incremental and changed_files:
-            ingester.ingest_incremental(codebase, changed_files)
+            ingester.ingest_incremental(codebase, changed_files,
+                                        skip_embeddings=skip_embeddings)
         else:
-            ingester.ingest(codebase)
+            ingester.ingest(codebase, skip_embeddings=skip_embeddings)
         return codebase.get_stats()
     finally:
         ingester.close()

@@ -729,3 +729,59 @@ class TestQuerierGetTestsForFunction:
         _mock_session(q, [])
         result = q.get_tests_for_function("nonexistent")
         assert result == []
+
+
+# ── semantic search (vector path) ─────────────────────────────────────────
+
+class TestSemanticSearchVectorFallback:
+    """Test that semantic_code_search falls back to substring when embeddings unavailable."""
+
+    def test_fallback_to_substring_when_model_unavailable(self):
+        """When _embed_texts returns [] (model absent), substring path is used."""
+        q = _make_querier()
+        mock_session = MagicMock()
+        mock_result = MagicMock()
+        mock_result.__iter__ = MagicMock(return_value=iter([]))
+        mock_session.run.return_value = mock_result
+        q.driver.session.return_value.__enter__ = MagicMock(return_value=mock_session)
+        q.driver.session.return_value.__exit__ = MagicMock(return_value=False)
+
+        with patch("src.neo4j_ingester._embed_texts", return_value=[]):
+            q.semantic_code_search("authentication")
+        query = mock_session.run.call_args[0][0]
+        assert "CONTAINS" in query  # substring path used
+
+    def test_vector_path_used_when_embedding_available(self):
+        """When _embed_texts returns a vector, the vector index query is used."""
+        q = _make_querier()
+        mock_session = MagicMock()
+        mock_result = MagicMock()
+        mock_result.__iter__ = MagicMock(return_value=iter([]))
+        mock_session.run.return_value = mock_result
+        q.driver.session.return_value.__enter__ = MagicMock(return_value=mock_session)
+        q.driver.session.return_value.__exit__ = MagicMock(return_value=False)
+
+        fake_vector = [0.1] * 384
+        with patch("src.neo4j_ingester._embed_texts", return_value=[fake_vector]):
+            q.semantic_code_search("authentication")
+        query = mock_session.run.call_args[0][0]
+        assert "vector" in query.lower() or "queryNodes" in query
+
+
+# ── skip_embeddings in ingest ──────────────────────────────────────────────
+
+class TestSkipEmbeddings:
+    def test_skip_embeddings_does_not_call_embed(self):
+        ingester = Neo4jIngester.__new__(Neo4jIngester)
+        ingester._skip_embeddings = True
+        mock_session = MagicMock()
+        mock_session.run.return_value = MagicMock()
+
+        from src.models import Function
+        fn = Function(id="f1", name="foo")
+        cb = _make_codebase()
+        cb.functions = [fn]
+
+        with patch("src.neo4j_ingester._embed_texts") as mock_embed:
+            ingester._ingest_functions(mock_session, cb)
+            mock_embed.assert_not_called()

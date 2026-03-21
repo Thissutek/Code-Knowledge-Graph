@@ -29,6 +29,7 @@ def cmd_index(args):
         neo4j_password=args.neo4j_password,
         incremental=args.incremental,
         changed_files=changed_files,
+        skip_embeddings=args.no_embeddings,
     )
     print(f"Indexing complete!")
     print(f"Statistics: {json.dumps(stats, indent=2)}")
@@ -245,6 +246,8 @@ Examples:
                               help='Only re-index changed files')
     index_parser.add_argument('--changed-files', nargs='+', metavar='FILE',
                               help='List of changed files (relative paths) for incremental indexing')
+    index_parser.add_argument('--no-embeddings', action='store_true', default=False,
+                              help='Skip vector embedding generation (faster indexing, no semantic search)')
     index_parser.set_defaults(func=cmd_index)
 
     # Search command
