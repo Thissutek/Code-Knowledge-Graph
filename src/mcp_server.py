@@ -421,6 +421,31 @@ TOOLS = [
                 }
             }
         }
+    ),
+    Tool(
+        name="list_repositories",
+        description="""List all repositories indexed in the knowledge graph.
+        Returns each repository's ID, path, and counts of files, functions, and classes.""",
+        inputSchema={
+            "type": "object",
+            "properties": {}
+        }
+    ),
+    Tool(
+        name="remove_repository",
+        description="""Remove a repository and all its associated data from the knowledge graph.
+        This permanently deletes all indexed nodes (files, classes, functions, etc.)
+        for the given repository ID.""",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "repo_id": {
+                    "type": "string",
+                    "description": "ID of the repository to remove"
+                }
+            },
+            "required": ["repo_id"]
+        }
     )
 ]
 
@@ -834,6 +859,23 @@ async def handle_get_graph_stats(arguments: Dict[str, Any]) -> str:
     }, indent=2)
 
 
+async def handle_list_repositories(arguments: Dict[str, Any]) -> str:
+    """List all indexed repositories"""
+    q = get_querier()
+    repos = q.list_repositories()
+    return json.dumps({"repositories": repos, "count": len(repos)}, indent=2)
+
+
+async def handle_remove_repository(arguments: Dict[str, Any]) -> str:
+    """Remove a repository and all its data from the graph"""
+    q = get_querier()
+    repo_id = arguments["repo_id"]
+    removed = q.remove_repository(repo_id)
+    if removed:
+        return json.dumps({"success": True, "message": f"Repository '{repo_id}' removed"})
+    return json.dumps({"success": False, "message": f"Repository '{repo_id}' not found"})
+
+
 # Tool handler mapping
 TOOL_HANDLERS = {
     "search_code": handle_search_code,
@@ -850,6 +892,8 @@ TOOL_HANDLERS = {
     "find_high_complexity_functions": handle_find_high_complexity,
     "health_check": handle_health_check,
     "get_graph_stats": handle_get_graph_stats,
+    "list_repositories": handle_list_repositories,
+    "remove_repository": handle_remove_repository,
 }
 
 
