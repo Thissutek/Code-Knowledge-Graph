@@ -3,13 +3,17 @@
 Code Knowledge Graph MCP Server
 Exposes code search and context retrieval capabilities to AI assistants
 """
+import logging
 import os
 import sys
 import json
 import time
 import asyncio
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
+
+_logger = logging.getLogger(__name__)
 
 # MCP SDK imports
 try:
@@ -30,6 +34,24 @@ from src.parser import parse_repository
 
 
 MAX_QUERY_LIMIT = 200
+
+
+def _validate_repo_path(repo_path: str) -> str:
+    """Validate repo_path against ALLOWED_INDEX_ROOT to prevent path traversal."""
+    resolved = str(Path(repo_path).resolve())
+    raw = os.environ.get("ALLOWED_INDEX_ROOT", "").strip()
+    if not raw:
+        _logger.warning("ALLOWED_INDEX_ROOT not set; any path may be indexed via MCP.")
+        return resolved
+    roots = [r.strip() for r in raw.split(os.pathsep) if r.strip()]
+    for root in roots:
+        allowed = str(Path(root).resolve())
+        if resolved == allowed or resolved.startswith(allowed + os.sep):
+            return resolved
+    raise ValueError(
+        f"repo_path '{resolved}' is not under any allowed ALLOWED_INDEX_ROOT.")
+
+
 
 # Initialize MCP server
 server = Server("code-kag")
@@ -526,12 +548,13 @@ async def handle_get_code_context(arguments: Dict[str, Any]) -> str:
 async def handle_index_repository(arguments: Dict[str, Any]) -> str:
     """Index a repository into the knowledge graph"""
     from src.neo4j_ingester import ingest_repository
-    
+
     repo_path = arguments["repo_path"]
     repo_id = arguments.get("repo_id")
-    
+
     try:
-        stats = ingest_repository(repo_path, repo_id=repo_id)
+        safe_path = _validate_repo_path(repo_path)
+        stats = ingest_repository(safe_path, repo_id=repo_id)
         return json.dumps({
             "success": True,
             "repository": repo_path,
