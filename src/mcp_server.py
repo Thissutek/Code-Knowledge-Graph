@@ -214,6 +214,31 @@ TOOLS = [
         }
     ),
     Tool(
+        name="get_callers",
+        description="""Get all functions that call a specific function (reverse call graph).
+        Useful for impact analysis - understanding what code would be affected by changing
+        a function, and for tracing how a function is used throughout the codebase.""",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "function_id": {
+                    "type": "string",
+                    "description": "ID of the function to find callers for (file:function or file:class:method)"
+                },
+                "limit": {
+                    "type": "integer",
+                    "default": 20,
+                    "description": "Maximum number of callers to return"
+                },
+                "repo_id": {
+                    "type": "string",
+                    "description": "Optional repository ID to scope results to a specific project"
+                }
+            },
+            "required": ["function_id"]
+        }
+    ),
+    Tool(
         name="get_class_hierarchy",
         description="""Get the inheritance hierarchy for a class.
         Returns ancestor classes (parents) and descendant classes (children).""",
@@ -501,6 +526,20 @@ async def handle_get_call_graph(arguments: Dict[str, Any]) -> str:
     return json.dumps(result, indent=2)
 
 
+async def handle_get_callers(arguments: Dict[str, Any]) -> str:
+    """Get all functions that call a specific function"""
+    q = get_querier()
+    function_id = arguments["function_id"]
+    limit = arguments.get("limit", 20)
+    repo_id = arguments.get("repo_id")
+
+    results = q.get_callers(function_id, limit=limit, repo_id=repo_id)
+    if not results:
+        return json.dumps({"function_id": function_id, "callers": [], "message": "No callers found"})
+
+    return json.dumps({"function_id": function_id, "callers": results}, indent=2)
+
+
 async def handle_get_class_hierarchy(arguments: Dict[str, Any]) -> str:
     """Get class inheritance hierarchy"""
     q = get_querier()
@@ -778,6 +817,7 @@ TOOL_HANDLERS = {
     "get_function_details": handle_get_function_details,
     "get_class_details": handle_get_class_details,
     "get_call_graph": handle_get_call_graph,
+    "get_callers": handle_get_callers,
     "get_class_hierarchy": handle_get_class_hierarchy,
     "get_file_dependencies": handle_get_file_dependencies,
     "find_similar_code": handle_find_similar_code,

@@ -342,6 +342,44 @@ class TestQuerierCallGraph:
         assert result == {}
 
 
+# ── get_callers ────────────────────────────────────────────────────────────
+
+class TestQuerierGetCallers:
+    def test_without_repo_id(self):
+        q = _make_querier()
+        rec = {"id": "f2", "name": "bar", "signature": "()", "filePath": "src/bar.py", "startLine": 10}
+        sess = _mock_session(q, [rec])
+        result = q.get_callers("f1")
+        query = sess.run.call_args[0][0]
+        assert "CALLS" in query
+        assert "$function_id" in query
+        assert "$limit" in query
+        assert result == [rec]
+
+    def test_with_repo_id(self):
+        q = _make_querier()
+        rec = {"id": "f2", "name": "bar", "signature": "()", "filePath": "src/bar.py", "startLine": 10}
+        sess = _mock_session(q, [rec])
+        q.get_callers("f1", repo_id="r1")
+        query = sess.run.call_args[0][0]
+        assert "$repo_id" in query
+        assert "Repository" in query
+
+    def test_empty_result(self):
+        q = _make_querier()
+        _mock_session(q, [])
+        result = q.get_callers("nonexistent")
+        assert result == []
+
+    def test_custom_limit(self):
+        q = _make_querier()
+        rec = {"id": "f2", "name": "bar", "signature": "()", "filePath": "src/bar.py", "startLine": 10}
+        sess = _mock_session(q, [rec])
+        q.get_callers("f1", limit=5)
+        kwargs = sess.run.call_args[1]
+        assert kwargs.get("limit") == 5
+
+
 # ── get_class_hierarchy ────────────────────────────────────────────────────
 
 class TestQuerierClassHierarchy:
