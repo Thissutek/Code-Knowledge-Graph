@@ -33,6 +33,10 @@ from src.neo4j_ingester import CodeKAGQuerier
 from src.parser import parse_repository
 
 
+MAX_QUERY_LIMIT = 200
+
+
+
 def _validate_repo_path(repo_path: str) -> str:
     """Validate repo_path against ALLOWED_INDEX_ROOT to prevent path traversal."""
     resolved = str(Path(repo_path).resolve())
@@ -386,7 +390,7 @@ async def handle_search_code(arguments: Dict[str, Any]) -> str:
     q = get_querier()
     query = arguments.get("query", "")
     search_type = arguments.get("type", "all")
-    limit = arguments.get("limit", 10)
+    limit = min(int(arguments.get("limit", 10)), MAX_QUERY_LIMIT)
     repo_id = arguments.get("repo_id")
 
     if search_type == "all":
@@ -518,7 +522,7 @@ async def handle_find_similar_code(arguments: Dict[str, Any]) -> str:
     """Find similar functions"""
     q = get_querier()
     function_id = arguments["function_id"]
-    limit = arguments.get("limit", 5)
+    limit = min(int(arguments.get("limit", 5)), MAX_QUERY_LIMIT)
     repo_id = arguments.get("repo_id")
 
     results = q.find_similar_functions(function_id, limit, repo_id=repo_id)
@@ -544,10 +548,10 @@ async def handle_get_code_context(arguments: Dict[str, Any]) -> str:
 async def handle_index_repository(arguments: Dict[str, Any]) -> str:
     """Index a repository into the knowledge graph"""
     from src.neo4j_ingester import ingest_repository
-    
+
     repo_path = arguments["repo_path"]
     repo_id = arguments.get("repo_id")
-    
+
     try:
         safe_path = _validate_repo_path(repo_path)
         stats = ingest_repository(safe_path, repo_id=repo_id)
@@ -566,7 +570,7 @@ async def handle_index_repository(arguments: Dict[str, Any]) -> str:
 async def handle_find_entry_points(arguments: Dict[str, Any]) -> str:
     """Find entry point functions"""
     q = get_querier()
-    limit = arguments.get("limit", 20)
+    limit = min(int(arguments.get("limit", 20)), MAX_QUERY_LIMIT)
     repo_id = arguments.get("repo_id")
 
     with q.driver.session() as session:
@@ -600,7 +604,7 @@ async def handle_find_high_complexity(arguments: Dict[str, Any]) -> str:
     """Find high complexity functions"""
     q = get_querier()
     min_complexity = arguments.get("min_complexity", 5)
-    limit = arguments.get("limit", 10)
+    limit = min(int(arguments.get("limit", 10)), MAX_QUERY_LIMIT)
     repo_id = arguments.get("repo_id")
 
     with q.driver.session() as session:
