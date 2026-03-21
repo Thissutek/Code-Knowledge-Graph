@@ -576,6 +576,30 @@ class CodeKAGQuerier:
             record = result.single()
             return dict(record) if record else {}
     
+    def get_callers(self, function_id: str, limit: int = 20, repo_id: str = None) -> List[Dict]:
+        """Get all functions that call the given function (reverse call graph)"""
+        with self.driver.session() as session:
+            if repo_id:
+                result = session.run("""
+                    MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(file:File)
+                          -[:DEFINES_FUNCTION|DEFINES_CLASS]->()-[:HAS_METHOD*0..1]->(caller:Function)
+                    WHERE (caller)-[:CALLS]->(:Function {id: $function_id})
+                    RETURN caller.id AS id, caller.name AS name,
+                           caller.signature AS signature, file.path AS filePath,
+                           caller.startLine AS startLine
+                    LIMIT $limit
+                """, function_id=function_id, repo_id=repo_id, limit=limit)
+            else:
+                result = session.run("""
+                    MATCH (caller:Function)-[:CALLS]->(:Function {id: $function_id})
+                    OPTIONAL MATCH (file:File)-[:DEFINES_FUNCTION|DEFINES_CLASS]->()-[:HAS_METHOD*0..1]->(caller)
+                    RETURN caller.id AS id, caller.name AS name,
+                           caller.signature AS signature, file.path AS filePath,
+                           caller.startLine AS startLine
+                    LIMIT $limit
+                """, function_id=function_id, limit=limit)
+            return [dict(record) for record in result]
+
     def get_class_hierarchy(self, class_name: str, repo_id: str = None) -> Dict:
         """Get class inheritance hierarchy"""
         with self.driver.session() as session:
