@@ -610,3 +610,58 @@ class TestFindEntryPointsFilters:
     def test_path_prefix_absent_when_empty(self):
         query = self._run_handler({"path_prefix": ""})
         assert "$path_prefix" not in query
+
+
+# ── list_repositories ──────────────────────────────────────────────────────
+
+class TestQuerierListRepositories:
+    def test_returns_repo_list(self):
+        q = _make_querier()
+        rec = {"id": "repo1", "path": "/src", "fileCount": 10, "functionCount": 50, "classCount": 5}
+        sess = _mock_session(q, [rec])
+        result = q.list_repositories()
+        query = sess.run.call_args[0][0]
+        assert "Repository" in query
+        assert result == [rec]
+
+    def test_empty_graph(self):
+        q = _make_querier()
+        _mock_session(q, [])
+        result = q.list_repositories()
+        assert result == []
+
+
+# ── remove_repository ──────────────────────────────────────────────────────
+
+class TestQuerierRemoveRepository:
+    def test_returns_false_when_not_found(self):
+        q = _make_querier()
+        mock_session = MagicMock()
+        mock_result = MagicMock()
+        mock_result.single.return_value = {"n": 0}
+        mock_session.run.return_value = mock_result
+        q.driver.session.return_value.__enter__ = MagicMock(return_value=mock_session)
+        q.driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        assert q.remove_repository("nonexistent") is False
+
+    def test_returns_true_and_clears_when_found(self):
+        q = _make_querier()
+        mock_session = MagicMock()
+
+        call_count = [0]
+        def side_effect(*args, **kwargs):
+            call_count[0] += 1
+            mock_result = MagicMock()
+            # First call: existence check — repo found
+            mock_result.single.return_value = {"n": 1}
+            mock_result.__iter__ = MagicMock(return_value=iter([]))
+            return mock_result
+
+        mock_session.run.side_effect = side_effect
+        q.driver.session.return_value.__enter__ = MagicMock(return_value=mock_session)
+        q.driver.session.return_value.__exit__ = MagicMock(return_value=False)
+
+        result = q.remove_repository("repo1")
+        assert result is True
+        # clear_repository runs multiple DELETE statements
+        assert mock_session.run.call_count > 1

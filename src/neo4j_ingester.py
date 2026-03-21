@@ -879,6 +879,43 @@ class CodeKAGQuerier:
 
         return results[:limit]
 
+    def list_repositories(self) -> List[Dict]:
+        """List all indexed repositories with basic stats."""
+        with self.driver.session() as session:
+            result = session.run("""
+                MATCH (r:Repository)
+                OPTIONAL MATCH (r)-[:CONTAINS_FILE]->(f:File)
+                WITH r, count(DISTINCT f) AS fileCount
+                OPTIONAL MATCH (r)-[:CONTAINS_FILE]->(:File)-[:DEFINES_FUNCTION|DEFINES_CLASS]->()-[:HAS_METHOD*0..1]->(fn:Function)
+                WITH r, fileCount, count(DISTINCT fn) AS functionCount
+                OPTIONAL MATCH (r)-[:CONTAINS_FILE]->(:File)-[:DEFINES_CLASS]->(c:Class)
+                RETURN r.id AS id, r.path AS path,
+                       fileCount, functionCount, count(DISTINCT c) AS classCount
+                ORDER BY r.id
+            """)
+            return [dict(record) for record in result]
+
+    def remove_repository(self, repo_id: str) -> bool:
+        """Remove a repository and all its associated data from the graph.
+
+        Returns True if the repository was found and removed, False if not found.
+        Delegates to Neo4jIngester.clear_repository() to reuse its safe
+        multi-step deletion logic.
+        """
+        with self.driver.session() as session:
+            exists = session.run(
+                "MATCH (r:Repository {id: $repo_id}) RETURN count(r) AS n",
+                repo_id=repo_id
+            ).single()
+            if not exists or exists["n"] == 0:
+                return False
+
+        ingester = Neo4jIngester.__new__(Neo4jIngester)
+        ingester.driver = self.driver
+        ingester.clear_repository(repo_id)
+        return True
+
+
 def ingest_repository(repo_path: str, repo_id: str = None, neo4j_uri: str = None,
                       neo4j_user: str = None, neo4j_password: str = None,
                       incremental: bool = False,
