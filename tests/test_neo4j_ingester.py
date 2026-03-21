@@ -665,3 +665,67 @@ class TestQuerierRemoveRepository:
         assert result is True
         # clear_repository runs multiple DELETE statements
         assert mock_session.run.call_count > 1
+
+
+# ── _link_tests_to_implementations ────────────────────────────────────────
+
+class TestLinkTestsToImplementations:
+    def test_cypher_uses_tests_relationship(self):
+        ingester = Neo4jIngester.__new__(Neo4jIngester)
+        mock_session = MagicMock()
+        ingester._link_tests_to_implementations(mock_session, "repo1")
+        query = mock_session.run.call_args[0][0]
+        assert "TESTS" in query
+        assert "$repo_id" in query
+        assert "MERGE" in query
+
+    def test_called_during_ingest(self):
+        ingester = Neo4jIngester.__new__(Neo4jIngester)
+        mock_session = MagicMock()
+        mock_session.run.return_value = MagicMock()
+        ingester.driver = MagicMock()
+        ingester.driver.session.return_value.__enter__ = MagicMock(return_value=mock_session)
+        ingester.driver.session.return_value.__exit__ = MagicMock(return_value=False)
+
+        cb = _make_codebase("r1")
+
+        with patch.object(ingester, "clear_repository"), \
+             patch.object(ingester, "_ingest_repository"), \
+             patch.object(ingester, "_ingest_files"), \
+             patch.object(ingester, "_ingest_modules"), \
+             patch.object(ingester, "_ingest_classes"), \
+             patch.object(ingester, "_ingest_functions"), \
+             patch.object(ingester, "_ingest_variables"), \
+             patch.object(ingester, "_ingest_imports"), \
+             patch.object(ingester, "_ingest_interfaces"), \
+             patch.object(ingester, "_ingest_relationships"), \
+             patch.object(ingester, "_link_tests_to_implementations") as mock_link:
+            ingester.ingest(cb)
+            mock_link.assert_called_once_with(mock_session, "r1")
+
+
+# ── get_tests_for_function ─────────────────────────────────────────────────
+
+class TestQuerierGetTestsForFunction:
+    def test_without_repo_id(self):
+        q = _make_querier()
+        rec = {"id": "t1", "name": "test_parse", "signature": "()", "filePath": "tests/test_p.py", "startLine": 5}
+        sess = _mock_session(q, [rec])
+        result = q.get_tests_for_function("src/p.py:parse")
+        query = sess.run.call_args[0][0]
+        assert "TESTS" in query
+        assert "$function_id" in query
+        assert result == [rec]
+
+    def test_with_repo_id(self):
+        q = _make_querier()
+        _mock_session(q, [])
+        q.get_tests_for_function("src/p.py:parse", repo_id="r1")
+        query = q.driver.session.return_value.__enter__.return_value.run.call_args[0][0]
+        assert "$repo_id" in query
+
+    def test_empty_result(self):
+        q = _make_querier()
+        _mock_session(q, [])
+        result = q.get_tests_for_function("nonexistent")
+        assert result == []
