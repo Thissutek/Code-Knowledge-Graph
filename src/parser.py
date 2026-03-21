@@ -3,10 +3,13 @@ Python Code Parser
 Extracts code structure from Python files using AST
 """
 import ast
+import logging
 import os
 import hashlib
 from pathlib import Path
 from typing import List, Dict, Set, Optional, Tuple
+
+_logger = logging.getLogger(__name__)
 from .models import (
     ParsedCodebase, Repository, File, Module, Class, Function,
     Variable, Import, Parameter, Relationship
@@ -68,7 +71,7 @@ class PythonParser(ast.NodeVisitor):
             return None
         try:
             return ast.unparse(annotation)
-        except:
+        except Exception:
             return str(annotation)
 
     def _calculate_complexity(self, node) -> int:
@@ -186,7 +189,7 @@ class PythonParser(ast.NodeVisitor):
             for i, default in enumerate(defaults):
                 try:
                     parameters[offset + i].default_value = ast.unparse(default)
-                except:
+                except Exception:
                     pass
 
         # Determine visibility
@@ -412,7 +415,7 @@ class CodebaseParser:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 source_code = f.read()
         except Exception as e:
-            print(f"Error reading {file_path}: {e}")
+            _logger.error("Error reading %s: %s", file_path, e)
             return
 
         # Create file entity
@@ -457,7 +460,7 @@ class CodebaseParser:
 
         # Use language-specific parser
         if parser is None:
-            print(f"No parser available for {file_path}")
+            _logger.warning("No parser available for %s", file_path)
             return
 
         result = parser.parse_file(file_path, source_code)
@@ -482,6 +485,10 @@ class CodebaseParser:
         # Add file -> import relationships
         for imp in result.get('imports', []):
             codebase.add_relationship('IMPORTS', file_id, imp.id)
+
+        # Add file -> interface relationships
+        for iface in result.get('interfaces', []):
+            codebase.add_relationship('DEFINES_INTERFACE', file_id, iface.id)
 
         # Store call information for later resolution
         function_calls = result.get('function_calls', {})
@@ -569,20 +576,24 @@ class CodebaseParser:
             # Also add just the filename without path
             import_to_file[file_entity.name.replace('.py', '')] = file_entity.id
 
+        imports_by_file: Dict[str, List] = {}
+        for imp in codebase.imports:
+            prefix = imp.id.split(':')[0]  # file_id is first segment before ':'
+            imports_by_file.setdefault(prefix, []).append(imp)
+
         for file_entity in codebase.files:
-            for imp in codebase.imports:
-                if imp.id.startswith(file_entity.id):
-                    # This import belongs to this file
-                    source_module = imp.source.split('.')[0]
-                    if source_module in import_to_file and import_to_file[source_module] != file_entity.id:
-                        codebase.add_relationship(
-                            'IMPORTS_FROM', file_entity.id, import_to_file[source_module],
-                            symbols=str(imp.imported_symbols)
-                        )
-                        codebase.add_relationship(
-                            'DEPENDS_ON', file_entity.id, import_to_file[source_module],
-                            dependencyType='import'
-                        )
+            for imp in imports_by_file.get(file_entity.id, []):
+                # This import belongs to this file
+                source_module = imp.source.split('.')[0]
+                if source_module in import_to_file and import_to_file[source_module] != file_entity.id:
+                    codebase.add_relationship(
+                        'IMPORTS_FROM', file_entity.id, import_to_file[source_module],
+                        symbols=str(imp.imported_symbols)
+                    )
+                    codebase.add_relationship(
+                        'DEPENDS_ON', file_entity.id, import_to_file[source_module],
+                        dependencyType='import'
+                    )
 
 
 def parse_repository(repo_path: str, repo_id: Optional[str] = None) -> ParsedCodebase:
