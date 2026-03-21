@@ -2,12 +2,15 @@
 Hook Manager
 Installs and uninstalls code-kag git hooks into target repositories.
 """
+import logging
 import os
 import re
 import stat
 import shutil
 from pathlib import Path
 from typing import Optional
+
+_logger = logging.getLogger(__name__)
 
 
 HOOK_NAMES = ['post-commit', 'post-merge', 'post-checkout', 'post-rewrite']
@@ -37,8 +40,14 @@ class HookManager:
             mode: 'incremental' or 'full' re-indexing mode.
             neo4j_uri: Neo4j connection URI (default: env NEO4J_URI or bolt://localhost:7687).
             neo4j_user: Neo4j username (default: env NEO4J_USERNAME or 'neo4j').
-            neo4j_password: Neo4j password (default: env NEO4J_PASSWORD, required).
+            neo4j_password: Deprecated and ignored. Passwords are never written to hook
+                scripts. Set the NEO4J_PASSWORD environment variable instead.
         """
+        if neo4j_password is not None:
+            _logger.warning(
+                "neo4j_password passed to install() is ignored. "
+                "Set the NEO4J_PASSWORD environment variable so hooks can read it at runtime."
+            )
         neo4j_uri = neo4j_uri or os.getenv('NEO4J_URI', 'bolt://localhost:7687')
         neo4j_user = neo4j_user or os.getenv('NEO4J_USERNAME', 'neo4j')
 
