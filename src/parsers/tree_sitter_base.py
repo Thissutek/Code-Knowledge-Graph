@@ -32,7 +32,11 @@ class TreeSitterBaseParser(LanguageParser):
         return self._parser.parse(source_code.encode('utf-8'))
 
     def _extract_text(self, node: Node, source_bytes: bytes) -> str:
-        """Extract text content from a tree-sitter node."""
+        """Extract the source text for a tree-sitter node via byte-offset slicing.
+
+        Uses the node's start_byte/end_byte positions to slice into the
+        original source bytes, then decodes the result as UTF-8.
+        """
         return source_bytes[node.start_byte:node.end_byte].decode('utf-8')
 
     def _find_children_by_type(self, node: Node, *types: str) -> List[Node]:
