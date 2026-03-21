@@ -7,7 +7,7 @@ import stat
 import pytest
 from pathlib import Path
 
-from src.mcp_server import _validate_repo_path, MAX_QUERY_LIMIT
+from src.mcp_server import _validate_repo_path, MAX_QUERY_LIMIT, _parse_limit
 from src.hooks.hook_manager import HookManager, CODE_KAG_MARKER
 
 
@@ -63,6 +63,32 @@ class TestMaxQueryLimit:
         """Sanity check that the limit is exactly 200."""
         assert isinstance(MAX_QUERY_LIMIT, int)
         assert MAX_QUERY_LIMIT > 0
+
+
+class TestParseLimit:
+    def test_normal_value_returned(self):
+        assert _parse_limit(50, default=10) == 50
+
+    def test_value_capped_at_max(self):
+        assert _parse_limit(9999, default=10) == MAX_QUERY_LIMIT
+
+    def test_exact_max_accepted(self):
+        assert _parse_limit(MAX_QUERY_LIMIT, default=10) == MAX_QUERY_LIMIT
+
+    def test_non_numeric_string_falls_back_to_default(self):
+        assert _parse_limit("abc", default=10) == 10
+
+    def test_none_falls_back_to_default(self):
+        assert _parse_limit(None, default=5) == 5
+
+    def test_zero_clamped_to_one(self):
+        assert _parse_limit(0, default=10) == 1
+
+    def test_negative_clamped_to_one(self):
+        assert _parse_limit(-50, default=10) == 1
+
+    def test_string_numeric_parsed(self):
+        assert _parse_limit("42", default=10) == 42
 
 
 # ── Password not written to common.sh ─────────────────────────────────────

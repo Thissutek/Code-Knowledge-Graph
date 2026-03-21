@@ -36,6 +36,14 @@ from src.parser import parse_repository
 MAX_QUERY_LIMIT = 200
 
 
+def _parse_limit(value: Any, default: int) -> int:
+    """Parse a limit argument safely, clamping to [1, MAX_QUERY_LIMIT]."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(1, min(parsed, MAX_QUERY_LIMIT))
+
 
 def _validate_repo_path(repo_path: str) -> str:
     """Validate repo_path against ALLOWED_INDEX_ROOT to prevent path traversal."""
@@ -51,6 +59,7 @@ def _validate_repo_path(repo_path: str) -> str:
             return resolved
     raise ValueError(
         f"repo_path '{resolved}' is not under any allowed ALLOWED_INDEX_ROOT.")
+
 
 
 # Initialize MCP server
@@ -390,7 +399,7 @@ async def handle_search_code(arguments: Dict[str, Any]) -> str:
     q = get_querier()
     query = arguments.get("query", "")
     search_type = arguments.get("type", "all")
-    limit = min(int(arguments.get("limit", 10)), MAX_QUERY_LIMIT)
+    limit = _parse_limit(arguments.get("limit", 10), default=10)
     repo_id = arguments.get("repo_id")
 
     if search_type == "all":
@@ -522,7 +531,7 @@ async def handle_find_similar_code(arguments: Dict[str, Any]) -> str:
     """Find similar functions"""
     q = get_querier()
     function_id = arguments["function_id"]
-    limit = min(int(arguments.get("limit", 5)), MAX_QUERY_LIMIT)
+    limit = _parse_limit(arguments.get("limit", 5), default=5)
     repo_id = arguments.get("repo_id")
 
     results = q.find_similar_functions(function_id, limit, repo_id=repo_id)
@@ -570,7 +579,7 @@ async def handle_index_repository(arguments: Dict[str, Any]) -> str:
 async def handle_find_entry_points(arguments: Dict[str, Any]) -> str:
     """Find entry point functions"""
     q = get_querier()
-    limit = min(int(arguments.get("limit", 20)), MAX_QUERY_LIMIT)
+    limit = _parse_limit(arguments.get("limit", 20), default=20)
     repo_id = arguments.get("repo_id")
 
     with q.driver.session() as session:
@@ -604,7 +613,7 @@ async def handle_find_high_complexity(arguments: Dict[str, Any]) -> str:
     """Find high complexity functions"""
     q = get_querier()
     min_complexity = arguments.get("min_complexity", 5)
-    limit = min(int(arguments.get("limit", 10)), MAX_QUERY_LIMIT)
+    limit = _parse_limit(arguments.get("limit", 10), default=10)
     repo_id = arguments.get("repo_id")
 
     with q.driver.session() as session:
