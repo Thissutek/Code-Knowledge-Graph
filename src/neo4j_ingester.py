@@ -2,8 +2,11 @@
 Neo4j Ingester
 Ingests parsed code structure into Neo4j graph database
 """
+import logging
 import os
 from typing import List, Dict, Any, Optional
+
+_logger = logging.getLogger(__name__)
 from neo4j import GraphDatabase
 from .models import ParsedCodebase, Relationship
 
@@ -29,7 +32,7 @@ class Neo4jIngester:
         # Test connection
         with self.driver.session() as session:
             session.run("RETURN 1")
-        print(f"Connected to Neo4j at {self.uri}")
+        _logger.info("Connected to Neo4j at %s", self.uri)
     
     def close(self):
         """Close the connection"""
@@ -65,16 +68,16 @@ class Neo4jIngester:
                     session.run(constraint)
                 except Exception as e:
                     if "already exists" not in str(e).lower():
-                        print(f"Warning creating constraint: {e}")
-            
+                        _logger.warning("Warning creating constraint: %s", e)
+
             for index in indexes:
                 try:
                     session.run(index)
                 except Exception as e:
                     if "already exists" not in str(e).lower():
-                        print(f"Warning creating index: {e}")
-        
-        print("Constraints and indexes created")
+                        _logger.warning("Warning creating index: %s", e)
+
+        _logger.info("Constraints and indexes created")
     
     def clear_repository(self, repo_id: str):
         """Clear all data for a specific repository.
@@ -140,7 +143,7 @@ class Neo4jIngester:
                 MATCH (r:Repository {id: $repo_id})
                 DETACH DELETE r
             """, repo_id=repo_id)
-        print(f"Cleared existing data for repository: {repo_id}")
+        _logger.info("Cleared existing data for repository: %s", repo_id)
     
     def ingest(self, codebase: ParsedCodebase, clear_existing: bool = True):
         """Ingest a parsed codebase into Neo4j"""
@@ -176,7 +179,7 @@ class Neo4jIngester:
             self._ingest_relationships(session, codebase)
 
         stats = codebase.get_stats()
-        print(f"Ingestion complete: {stats}")
+        _logger.info("Ingestion complete: %s", stats)
 
     def ingest_incremental(self, codebase: ParsedCodebase, changed_files: List[str]):
         """Incrementally ingest only changed files.
@@ -202,7 +205,7 @@ class Neo4jIngester:
             self._ingest_relationships(session, codebase)
 
         stats = codebase.get_stats()
-        print(f"Incremental ingestion complete for {len(changed_files)} file(s): {stats}")
+        _logger.info("Incremental ingestion complete for %d file(s): %s", len(changed_files), stats)
 
     def _clear_file_entities(self, session, repo_id: str, file_path: str):
         """Delete all entities associated with a specific file."""
@@ -381,7 +384,7 @@ class Neo4jIngester:
         
         for rel_type, records in rel_groups.items():
             if rel_type not in rel_config:
-                print(f"Warning: Unknown relationship type {rel_type}")
+                _logger.warning("Unknown relationship type %s", rel_type)
                 continue
 
             source_label, target_label = rel_config[rel_type]
@@ -419,7 +422,7 @@ class Neo4jIngester:
             try:
                 session.run(query, records=records)
             except Exception as e:
-                print(f"Error creating {rel_type} relationships: {e}")
+                _logger.error("Error creating %s relationships: %s", rel_type, e)
 
 
 class CodeKAGQuerier:
@@ -868,10 +871,10 @@ def ingest_repository(repo_path: str, repo_id: str = None, neo4j_uri: str = None
     parser = CodebaseParser(repo_path, repo_id)
 
     if incremental and changed_files:
-        print(f"Incremental indexing: {len(changed_files)} changed file(s)")
+        _logger.info("Incremental indexing: %d changed file(s)", len(changed_files))
         codebase = parser.parse_incremental(changed_files)
     else:
-        print(f"Parsing repository: {repo_path}")
+        _logger.info("Parsing repository: %s", repo_path)
         codebase = parser.parse()
 
     # Ingest into Neo4j
