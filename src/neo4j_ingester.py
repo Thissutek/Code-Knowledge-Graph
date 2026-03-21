@@ -328,7 +328,7 @@ class Neo4jIngester:
         """Ingest import nodes in batch"""
         if not codebase.imports:
             return
-        
+
         records = [i.to_dict() for i in codebase.imports]
         session.run("""
             UNWIND $records AS record
@@ -337,7 +337,7 @@ class Neo4jIngester:
                 i.source = record.source,
                 i.isExternal = record.isExternal
         """, records=records)
-    
+
     def _ingest_interfaces(self, session, codebase: ParsedCodebase):
         """Ingest interface nodes in batch"""
         if not codebase.interfaces:
