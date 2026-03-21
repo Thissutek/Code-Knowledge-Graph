@@ -52,6 +52,7 @@ class TestValidateRepoPath:
         assert resolved == str(tmp_path.resolve())
 
 
+
 # ── MAX_QUERY_LIMIT ────────────────────────────────────────────────────────
 
 class TestMaxQueryLimit:

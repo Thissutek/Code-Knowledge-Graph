@@ -159,6 +159,36 @@ class User implements Identifiable {
 }
 '''
 
+SAMPLE_JAVA_INNER_CLASSES = '''\
+public class Outer1 {
+    private String name;
+
+    public void process() {
+        Inner inner = new Inner();
+    }
+
+    class Inner {
+        private String name;
+
+        public void doWork() {
+            System.out.println("Outer1.Inner");
+        }
+    }
+}
+
+class Outer2 {
+    private int count;
+
+    class Inner {
+        private int count;
+
+        public void doWork() {
+            System.out.println("Outer2.Inner");
+        }
+    }
+}
+'''
+
 SAMPLE_GO = '''\
 package main
 

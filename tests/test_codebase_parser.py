@@ -287,3 +287,15 @@ class TestFunctionIdFormat:
                 f"CALLS source should be relative, got: {rel.source_id}")
             assert not rel.target_id.startswith('/'), (
                 f"CALLS target should be relative, got: {rel.target_id}")
+
+
+# ── Pending dict cleanup ────────────────────────────────────────────────────
+
+class TestPendingDictCleanup:
+    """Verify pending call dicts are cleared after _resolve_relationships()."""
+
+    def test_pending_dicts_empty_after_parse(self, sample_repo):
+        parser = CodebaseParser(str(sample_repo), "cleanup-test")
+        parser.parse()
+        assert parser._pending_function_calls == {}
+        assert parser._pending_class_usages == {}
