@@ -257,3 +257,15 @@ class TestIgnoreDirs:
         codebase = parser.parse()
         paths = [f.path for f in codebase.files]
         assert not any(".git" in p for p in paths)
+
+
+# ── Pending dict cleanup ────────────────────────────────────────────────────
+
+class TestPendingDictCleanup:
+    """Verify pending call dicts are cleared after _resolve_relationships()."""
+
+    def test_pending_dicts_empty_after_parse(self, sample_repo):
+        parser = CodebaseParser(str(sample_repo), "cleanup-test")
+        parser.parse()
+        assert parser._pending_function_calls == {}
+        assert parser._pending_class_usages == {}

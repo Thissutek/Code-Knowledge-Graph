@@ -595,6 +595,10 @@ class CodebaseParser:
                         dependencyType='import'
                     )
 
+        # Clear pending data — consumed, should not persist across calls
+        self._pending_function_calls = {}
+        self._pending_class_usages = {}
+
 
 def parse_repository(repo_path: str, repo_id: Optional[str] = None) -> ParsedCodebase:
     """Convenience function to parse a repository"""
