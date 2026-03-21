@@ -69,14 +69,14 @@ class Neo4jIngester:
                 except Exception as e:
                     if "already exists" not in str(e).lower():
                         _logger.warning("Warning creating constraint: %s", e)
-            
+
             for index in indexes:
                 try:
                     session.run(index)
                 except Exception as e:
                     if "already exists" not in str(e).lower():
                         _logger.warning("Warning creating index: %s", e)
-        
+
         _logger.info("Constraints and indexes created")
     
     def clear_repository(self, repo_id: str):
@@ -171,10 +171,13 @@ class Neo4jIngester:
             
             # Ingest imports
             self._ingest_imports(session, codebase)
-            
+
+            # Ingest interfaces
+            self._ingest_interfaces(session, codebase)
+
             # Create relationships
             self._ingest_relationships(session, codebase)
-        
+
         stats = codebase.get_stats()
         _logger.info("Ingestion complete: %s", stats)
 
@@ -198,6 +201,7 @@ class Neo4jIngester:
             self._ingest_functions(session, codebase)
             self._ingest_variables(session, codebase)
             self._ingest_imports(session, codebase)
+            self._ingest_interfaces(session, codebase)
             self._ingest_relationships(session, codebase)
 
         stats = codebase.get_stats()
@@ -334,6 +338,19 @@ class Neo4jIngester:
                 i.isExternal = record.isExternal
         """, records=records)
     
+    def _ingest_interfaces(self, session, codebase: ParsedCodebase):
+        """Ingest interface nodes in batch"""
+        if not codebase.interfaces:
+            return
+
+        records = [{'id': i.id, 'name': i.name, 'docstring': i.docstring}
+                   for i in codebase.interfaces]
+        session.run("""
+            UNWIND $records AS record
+            MERGE (i:Interface {id: record.id})
+            SET i.name = record.name, i.docstring = record.docstring
+        """, records=records)
+
     def _ingest_relationships(self, session, codebase: ParsedCodebase):
         """Ingest all relationships"""
         # Group relationships by type for efficient batch processing
@@ -350,6 +367,7 @@ class Neo4jIngester:
             'BELONGS_TO_MODULE': ('File', 'Module'),
             'DEFINES_CLASS': ('File', 'Class'),
             'DEFINES_FUNCTION': ('File', 'Function'),
+            'DEFINES_INTERFACE': ('File', 'Interface'),
             'HAS_METHOD': ('Class', 'Function'),
             'HAS_VARIABLE': ('Class', 'Variable'),
             'EXTENDS': ('Class', 'Class'),

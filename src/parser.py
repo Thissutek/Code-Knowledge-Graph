@@ -71,7 +71,7 @@ class PythonParser(ast.NodeVisitor):
             return None
         try:
             return ast.unparse(annotation)
-        except:
+        except Exception:
             return str(annotation)
 
     def _calculate_complexity(self, node) -> int:
@@ -189,7 +189,7 @@ class PythonParser(ast.NodeVisitor):
             for i, default in enumerate(defaults):
                 try:
                     parameters[offset + i].default_value = ast.unparse(default)
-                except:
+                except Exception:
                     pass
 
         # Determine visibility
@@ -335,10 +335,15 @@ class CodebaseParser:
     def __init__(self, repo_path: str, repo_id: Optional[str] = None):
         self.repo_path = Path(repo_path).resolve()
         self.repo_id = repo_id or self.repo_path.name
+        self._pending_function_calls: Dict[str, Dict] = {}
+        self._pending_class_usages: Dict[str, Dict] = {}
 
     def parse(self) -> ParsedCodebase:
         """Parse the entire codebase"""
         from .languages import get_all_supported_extensions
+
+        self._pending_function_calls = {}
+        self._pending_class_usages = {}
 
         # Create repository entity
         repo = Repository(
@@ -365,6 +370,9 @@ class CodebaseParser:
     def parse_incremental(self, changed_files: List[str]) -> ParsedCodebase:
         """Parse only the specified changed files."""
         from .languages import get_all_supported_extensions
+
+        self._pending_function_calls = {}
+        self._pending_class_usages = {}
 
         repo = Repository(
             id=self.repo_id,
@@ -478,13 +486,17 @@ class CodebaseParser:
         for imp in result.get('imports', []):
             codebase.add_relationship('IMPORTS', file_id, imp.id)
 
+        # Add file -> interface relationships
+        for iface in result.get('interfaces', []):
+            codebase.add_relationship('DEFINES_INTERFACE', file_id, iface.id)
+
         # Store call information for later resolution
         function_calls = result.get('function_calls', {})
         if function_calls:
-            file_entity._function_calls = function_calls
+            self._pending_function_calls[file_id] = function_calls
         class_usages = result.get('class_usages', {})
         if class_usages:
-            file_entity._class_usages = class_usages
+            self._pending_class_usages[file_id] = class_usages
 
     def _resolve_relationships(self, codebase: ParsedCodebase):
         """Resolve cross-file relationships"""
@@ -535,26 +547,25 @@ class CodebaseParser:
                 codebase.relationships.remove(rel)
 
         # Resolve function calls and class usages
-        for file_entity in codebase.files:
-            if hasattr(file_entity, '_function_calls'):
-                for func_id, calls in file_entity._function_calls.items():
-                    for called_name, line in calls:
-                        # Try to find the called function
-                        if called_name in func_by_name:
-                            for target_func in func_by_name[called_name]:
-                                codebase.add_relationship(
-                                    'CALLS', func_id, target_func.id,
-                                    lineNumbers=str([line])
-                                )
-                                break
-
-            if hasattr(file_entity, '_class_usages'):
-                for func_id, class_names in file_entity._class_usages.items():
-                    for class_name in class_names:
-                        if class_name in class_by_name:
+        for _file_id, function_calls in self._pending_function_calls.items():
+            for func_id, calls in function_calls.items():
+                for called_name, line in calls:
+                    # Try to find the called function
+                    if called_name in func_by_name:
+                        for target_func in func_by_name[called_name]:
                             codebase.add_relationship(
-                                'USES_CLASS', func_id, class_by_name[class_name].id
+                                'CALLS', func_id, target_func.id,
+                                lineNumbers=str([line])
                             )
+                            break
+
+        for _file_id, class_usages in self._pending_class_usages.items():
+            for func_id, class_names in class_usages.items():
+                for class_name in class_names:
+                    if class_name in class_by_name:
+                        codebase.add_relationship(
+                            'USES_CLASS', func_id, class_by_name[class_name].id
+                        )
 
         # Resolve import dependencies between files
         import_to_file: Dict[str, str] = {}
@@ -565,20 +576,24 @@ class CodebaseParser:
             # Also add just the filename without path
             import_to_file[file_entity.name.replace('.py', '')] = file_entity.id
 
+        imports_by_file: Dict[str, List] = {}
+        for imp in codebase.imports:
+            prefix = imp.id.split(':')[0]  # file_id is first segment before ':'
+            imports_by_file.setdefault(prefix, []).append(imp)
+
         for file_entity in codebase.files:
-            for imp in codebase.imports:
-                if imp.id.startswith(file_entity.id):
-                    # This import belongs to this file
-                    source_module = imp.source.split('.')[0]
-                    if source_module in import_to_file and import_to_file[source_module] != file_entity.id:
-                        codebase.add_relationship(
-                            'IMPORTS_FROM', file_entity.id, import_to_file[source_module],
-                            symbols=str(imp.imported_symbols)
-                        )
-                        codebase.add_relationship(
-                            'DEPENDS_ON', file_entity.id, import_to_file[source_module],
-                            dependencyType='import'
-                        )
+            for imp in imports_by_file.get(file_entity.id, []):
+                # This import belongs to this file
+                source_module = imp.source.split('.')[0]
+                if source_module in import_to_file and import_to_file[source_module] != file_entity.id:
+                    codebase.add_relationship(
+                        'IMPORTS_FROM', file_entity.id, import_to_file[source_module],
+                        symbols=str(imp.imported_symbols)
+                    )
+                    codebase.add_relationship(
+                        'DEPENDS_ON', file_entity.id, import_to_file[source_module],
+                        dependencyType='import'
+                    )
 
 
 def parse_repository(repo_path: str, repo_id: Optional[str] = None) -> ParsedCodebase:
