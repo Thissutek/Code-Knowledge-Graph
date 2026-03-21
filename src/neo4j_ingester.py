@@ -1129,6 +1129,137 @@ class CodeKAGQuerier:
                 """, function_id=function_id)
             return [dict(record) for record in result]
 
+    # ── Advanced analysis ──────────────────────────────────────────────────
+
+    def find_dead_code(self, repo_id: str = None, limit: int = 50) -> List[Dict]:
+        """Return functions/methods with no incoming CALLS edges (dead-code candidates).
+
+        Excludes common entry-point names and test functions.
+        """
+        _EXCLUDED_NAMES = ['main', '__init__', '__str__', '__repr__', '__new__',
+                           '__del__', '__enter__', '__exit__', '__len__',
+                           '__iter__', '__next__', '__call__', '__eq__',
+                           '__hash__', '__lt__', '__le__', '__gt__', '__ge__']
+        with self.driver.session() as session:
+            if repo_id:
+                result = session.run("""
+                    MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(file:File)
+                    MATCH (file)-[:DEFINES_FUNCTION|DEFINES_CLASS]->()-[:HAS_METHOD*0..1]->(f:Function)
+                    WHERE NOT ()-[:CALLS]->(f)
+                      AND NOT f.name STARTS WITH 'test'
+                      AND NOT f.name STARTS WITH 'Test'
+                      AND NOT f.name IN $excluded
+                    RETURN f.id AS id, f.name AS name, file.path AS filePath,
+                           f.startLine AS startLine, f.complexity AS complexity
+                    ORDER BY f.name
+                    LIMIT $limit
+                """, repo_id=repo_id, excluded=_EXCLUDED_NAMES, limit=limit)
+            else:
+                result = session.run("""
+                    MATCH (f:Function)
+                    WHERE NOT ()-[:CALLS]->(f)
+                      AND NOT f.name STARTS WITH 'test'
+                      AND NOT f.name STARTS WITH 'Test'
+                      AND NOT f.name IN $excluded
+                    OPTIONAL MATCH (file:File)-[:DEFINES_FUNCTION|DEFINES_CLASS]->()-[:HAS_METHOD*0..1]->(f)
+                    RETURN f.id AS id, f.name AS name, file.path AS filePath,
+                           f.startLine AS startLine, f.complexity AS complexity
+                    ORDER BY f.name
+                    LIMIT $limit
+                """, excluded=_EXCLUDED_NAMES, limit=limit)
+            return [dict(record) for record in result]
+
+    def analyze_change_impact(self, function_id: str, max_depth: int = 3,
+                               limit: int = 50, repo_id: str = None) -> List[Dict]:
+        """Trace what would be affected if *function_id* changes.
+
+        Performs forward traversal along CALLS edges up to *max_depth* hops.
+        Returns each affected function with its shortest distance from the start.
+        """
+        with self.driver.session() as session:
+            result = session.run("""
+                MATCH path = (start:Function {id: $function_id})-[:CALLS*1..$max_depth]->(affected:Function)
+                WHERE affected.id <> $function_id
+                WITH affected, min(length(path)) AS distance
+                OPTIONAL MATCH (file:File)-[:DEFINES_FUNCTION|DEFINES_CLASS]->()-[:HAS_METHOD*0..1]->(affected)
+                RETURN affected.id AS id, affected.name AS name,
+                       file.path AS filePath, affected.startLine AS startLine,
+                       distance
+                ORDER BY distance, affected.name
+                LIMIT $limit
+            """, function_id=function_id, max_depth=max_depth, limit=limit)
+            return [dict(record) for record in result]
+
+    def find_circular_dependencies(self, min_cycle_length: int = 2,
+                                    max_cycle_length: int = 5,
+                                    limit: int = 20,
+                                    repo_id: str = None) -> List[Dict]:
+        """Find CALLS cycles (A → B → … → A) of a given length range.
+
+        Returns each unique cycle as a list of function IDs.
+        """
+        with self.driver.session() as session:
+            if repo_id:
+                result = session.run("""
+                    MATCH path = (a:Function)-[:CALLS*$min_len..$max_len]->(a)
+                    WHERE (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(:File)
+                          -[:DEFINES_FUNCTION|DEFINES_CLASS]->()-[:HAS_METHOD*0..1]->(a)
+                    WITH [n IN nodes(path) | n.id] AS cycle,
+                         length(path) AS cycle_length
+                    RETURN DISTINCT cycle, cycle_length
+                    ORDER BY cycle_length
+                    LIMIT $limit
+                """, min_len=min_cycle_length, max_len=max_cycle_length,
+                     repo_id=repo_id, limit=limit)
+            else:
+                result = session.run("""
+                    MATCH path = (a:Function)-[:CALLS*$min_len..$max_len]->(a)
+                    WITH [n IN nodes(path) | n.id] AS cycle,
+                         length(path) AS cycle_length
+                    RETURN DISTINCT cycle, cycle_length
+                    ORDER BY cycle_length
+                    LIMIT $limit
+                """, min_len=min_cycle_length, max_len=max_cycle_length, limit=limit)
+            return [dict(record) for record in result]
+
+    def get_complexity_hotspots(self, repo_id: str = None, limit: int = 20) -> List[Dict]:
+        """Rank functions by coupling — total incoming + outgoing CALLS edges.
+
+        High coupling indicates potential refactoring candidates.
+        """
+        with self.driver.session() as session:
+            if repo_id:
+                result = session.run("""
+                    MATCH (r:Repository {id: $repo_id})-[:CONTAINS_FILE]->(file:File)
+                    MATCH (file)-[:DEFINES_FUNCTION|DEFINES_CLASS]->()-[:HAS_METHOD*0..1]->(f:Function)
+                    OPTIONAL MATCH (f)-[:CALLS]->(callee:Function)
+                    WITH f, file, count(callee) AS out_calls
+                    OPTIONAL MATCH ()-[:CALLS]->(f)
+                    WITH f, file, out_calls, count(*) AS in_calls
+                    RETURN f.id AS id, f.name AS name, file.path AS filePath,
+                           f.complexity AS complexity,
+                           out_calls AS outgoingCalls, in_calls AS incomingCalls,
+                           out_calls + in_calls AS totalCoupling
+                    ORDER BY totalCoupling DESC
+                    LIMIT $limit
+                """, repo_id=repo_id, limit=limit)
+            else:
+                result = session.run("""
+                    MATCH (f:Function)
+                    OPTIONAL MATCH (file:File)-[:DEFINES_FUNCTION|DEFINES_CLASS]->()-[:HAS_METHOD*0..1]->(f)
+                    OPTIONAL MATCH (f)-[:CALLS]->(callee:Function)
+                    WITH f, file, count(callee) AS out_calls
+                    OPTIONAL MATCH ()-[:CALLS]->(f)
+                    WITH f, file, out_calls, count(*) AS in_calls
+                    RETURN f.id AS id, f.name AS name, file.path AS filePath,
+                           f.complexity AS complexity,
+                           out_calls AS outgoingCalls, in_calls AS incomingCalls,
+                           out_calls + in_calls AS totalCoupling
+                    ORDER BY totalCoupling DESC
+                    LIMIT $limit
+                """, limit=limit)
+            return [dict(record) for record in result]
+
 
 def ingest_repository(repo_path: str, repo_id: str = None, neo4j_uri: str = None,
                       neo4j_user: str = None, neo4j_password: str = None,

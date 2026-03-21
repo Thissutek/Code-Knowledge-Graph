@@ -467,7 +467,105 @@ TOOLS = [
             },
             "required": ["repo_id"]
         }
-    )
+    ),
+    Tool(
+        name="find_dead_code",
+        description="""Find functions and methods that are never called (dead-code candidates).
+        Returns functions with no incoming CALLS edges, excluding common entry points
+        (main, __init__, test functions, etc.).
+        Useful for identifying code that can safely be removed.""",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "repo_id": {
+                    "type": "string",
+                    "description": "Optional repository ID to scope results"
+                },
+                "limit": {
+                    "type": "integer",
+                    "default": 50,
+                    "description": "Maximum number of results to return"
+                }
+            }
+        }
+    ),
+    Tool(
+        name="analyze_change_impact",
+        description="""Trace what would be affected if a specific function changes.
+        Traverses forward CALLS edges to find all downstream functions that depend on it.
+        Each result includes its distance (hops) from the changed function.
+        Useful for assessing the blast radius of a planned change.""",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "function_id": {
+                    "type": "string",
+                    "description": "ID of the function to analyse impact for"
+                },
+                "max_depth": {
+                    "type": "integer",
+                    "default": 3,
+                    "description": "Maximum traversal depth (hops)"
+                },
+                "limit": {
+                    "type": "integer",
+                    "default": 50,
+                    "description": "Maximum number of affected functions to return"
+                }
+            },
+            "required": ["function_id"]
+        }
+    ),
+    Tool(
+        name="find_circular_dependencies",
+        description="""Detect circular call chains (A calls B calls … calls A).
+        Returns each cycle as an ordered list of function IDs.
+        Useful for identifying architectural coupling issues.""",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "min_cycle_length": {
+                    "type": "integer",
+                    "default": 2,
+                    "description": "Minimum number of hops in a cycle"
+                },
+                "max_cycle_length": {
+                    "type": "integer",
+                    "default": 5,
+                    "description": "Maximum number of hops in a cycle"
+                },
+                "limit": {
+                    "type": "integer",
+                    "default": 20,
+                    "description": "Maximum number of cycles to return"
+                },
+                "repo_id": {
+                    "type": "string",
+                    "description": "Optional repository ID to scope results"
+                }
+            }
+        }
+    ),
+    Tool(
+        name="get_complexity_hotspots",
+        description="""Rank functions by coupling — total incoming + outgoing CALLS edges.
+        High coupling indicates functions that are hard to change safely.
+        Returns the most coupled functions first.""",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "repo_id": {
+                    "type": "string",
+                    "description": "Optional repository ID to scope results"
+                },
+                "limit": {
+                    "type": "integer",
+                    "default": 20,
+                    "description": "Maximum number of results to return"
+                }
+            }
+        }
+    ),
 ]
 
 
@@ -907,6 +1005,53 @@ async def handle_get_tests_for_function(arguments: Dict[str, Any]) -> str:
     return json.dumps({"function_id": function_id, "tests": results, "count": len(results)}, indent=2)
 
 
+async def handle_find_dead_code(arguments: Dict[str, Any]) -> str:
+    """Find functions with no incoming CALLS edges"""
+    q = get_querier()
+    repo_id = arguments.get("repo_id")
+    limit = arguments.get("limit", 50)
+    results = q.find_dead_code(repo_id=repo_id, limit=limit)
+    return json.dumps({"dead_code_candidates": results, "count": len(results)}, indent=2)
+
+
+async def handle_analyze_change_impact(arguments: Dict[str, Any]) -> str:
+    """Trace downstream impact of changing a function"""
+    q = get_querier()
+    function_id = arguments["function_id"]
+    max_depth = arguments.get("max_depth", 3)
+    limit = arguments.get("limit", 50)
+    results = q.analyze_change_impact(function_id, max_depth=max_depth, limit=limit)
+    return json.dumps({
+        "function_id": function_id,
+        "max_depth": max_depth,
+        "affected_functions": results,
+        "count": len(results),
+    }, indent=2)
+
+
+async def handle_find_circular_dependencies(arguments: Dict[str, Any]) -> str:
+    """Find circular call chains"""
+    q = get_querier()
+    repo_id = arguments.get("repo_id")
+    min_len = arguments.get("min_cycle_length", 2)
+    max_len = arguments.get("max_cycle_length", 5)
+    limit = arguments.get("limit", 20)
+    results = q.find_circular_dependencies(
+        min_cycle_length=min_len, max_cycle_length=max_len,
+        limit=limit, repo_id=repo_id,
+    )
+    return json.dumps({"circular_dependencies": results, "count": len(results)}, indent=2)
+
+
+async def handle_get_complexity_hotspots(arguments: Dict[str, Any]) -> str:
+    """Rank functions by coupling"""
+    q = get_querier()
+    repo_id = arguments.get("repo_id")
+    limit = arguments.get("limit", 20)
+    results = q.get_complexity_hotspots(repo_id=repo_id, limit=limit)
+    return json.dumps({"hotspots": results, "count": len(results)}, indent=2)
+
+
 # Tool handler mapping
 TOOL_HANDLERS = {
     "search_code": handle_search_code,
@@ -926,6 +1071,10 @@ TOOL_HANDLERS = {
     "get_graph_stats": handle_get_graph_stats,
     "list_repositories": handle_list_repositories,
     "remove_repository": handle_remove_repository,
+    "find_dead_code": handle_find_dead_code,
+    "analyze_change_impact": handle_analyze_change_impact,
+    "find_circular_dependencies": handle_find_circular_dependencies,
+    "get_complexity_hotspots": handle_get_complexity_hotspots,
 }
 
 

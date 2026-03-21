@@ -337,6 +337,7 @@ class CodebaseParser:
         self.repo_id = repo_id or self.repo_path.name
         self._pending_function_calls: Dict[str, Dict] = {}
         self._pending_class_usages: Dict[str, Dict] = {}
+        self._pending_source_code: Dict[str, str] = {}  # file_id → source, for relationship detectors
 
     def parse(self) -> ParsedCodebase:
         """Parse the entire codebase"""
@@ -498,6 +499,74 @@ class CodebaseParser:
         if class_usages:
             self._pending_class_usages[file_id] = class_usages
 
+        # Store source code for relationship detectors
+        self._pending_source_code[file_id] = source_code
+
+    def _apply_relationship_detectors(
+        self,
+        codebase: ParsedCodebase,
+        class_by_name: Dict[str, 'Class'],
+        func_by_name: Dict[str, List['Function']],
+    ):
+        """Run language-specific relationship detectors and merge into codebase.
+
+        Detectors run against the raw source of each parsed file.  Their output
+        is merged with the relationships already resolved via name-matching:
+        existing relationships are kept; detector results fill gaps with
+        confidence/detectionMethod properties attached.
+        """
+        from .relationships import RelationshipDetectorFactory
+
+        # Build a set of (source_id, target_id, rel_type) that already exist
+        existing: set = {
+            (r.source_id, r.target_id, r.rel_type) for r in codebase.relationships
+        }
+
+        for file_id, source_code in self._pending_source_code.items():
+            detector = RelationshipDetectorFactory.get_detector(file_id)
+            if detector is None:
+                continue
+            try:
+                detected = detector.detect(source_code, file_id)
+            except Exception as exc:
+                _logger.debug("Relationship detector failed for %s: %s", file_id, exc)
+                continue
+
+            for det in detected:
+                # Map source/target names to entity IDs using lookup tables
+                source_id = self._resolve_entity_id(det.source_name, file_id, class_by_name, func_by_name)
+                target_id = self._resolve_entity_id(det.target_name, file_id, class_by_name, func_by_name)
+                if source_id is None or target_id is None:
+                    continue
+                key = (source_id, target_id, det.relationship_type)
+                if key in existing:
+                    continue  # already known — skip duplicate
+                existing.add(key)
+                codebase.add_relationship(
+                    det.relationship_type, source_id, target_id,
+                    confidence=det.confidence,
+                    detectionMethod=det.detection_method,
+                    context=det.context,
+                    lineNumbers=str([det.line_number]),
+                )
+
+    @staticmethod
+    def _resolve_entity_id(
+        name: str,
+        file_id: str,
+        class_by_name: Dict[str, 'Class'],
+        func_by_name: Dict[str, List['Function']],
+    ) -> Optional[str]:
+        """Attempt to resolve a bare name to an entity ID."""
+        # Strip qualifier prefixes (e.g. "self.foo" → "foo", "ClassName::method" → "method")
+        bare = name.split('.')[-1].split('::')[-1]
+        if bare in func_by_name and func_by_name[bare]:
+            return func_by_name[bare][0].id
+        if bare in class_by_name:
+            return class_by_name[bare].id
+        # Fallback: return None so the relationship is dropped silently
+        return None
+
     def _resolve_relationships(self, codebase: ParsedCodebase):
         """Resolve cross-file relationships"""
         # Build lookup tables
@@ -595,9 +664,13 @@ class CodebaseParser:
                         dependencyType='import'
                     )
 
+        # Run language-specific relationship detectors and merge results
+        self._apply_relationship_detectors(codebase, class_by_name, func_by_name)
+
         # Clear pending data — consumed, should not persist across calls
         self._pending_function_calls = {}
         self._pending_class_usages = {}
+        self._pending_source_code = {}
 
 
 def parse_repository(repo_path: str, repo_id: Optional[str] = None) -> ParsedCodebase:

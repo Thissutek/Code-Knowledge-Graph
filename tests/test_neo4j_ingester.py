@@ -785,3 +785,94 @@ class TestSkipEmbeddings:
         with patch("src.neo4j_ingester._embed_texts") as mock_embed:
             ingester._ingest_functions(mock_session, cb)
             mock_embed.assert_not_called()
+
+
+# ── find_dead_code ──────────────────────────────────────────────────────────
+
+class TestFindDeadCode:
+    def test_query_excludes_test_functions(self):
+        q = _make_querier()
+        _mock_session(q, [])
+        q.find_dead_code()
+        query = q.driver.session.return_value.__enter__.return_value.run.call_args[0][0]
+        assert "CALLS" in query
+        assert "test" in query.lower()
+
+    def test_returns_results(self):
+        q = _make_querier()
+        rec = {"id": "src/a.py:foo", "name": "foo", "filePath": "src/a.py", "startLine": 1, "complexity": 2}
+        sess = _mock_session(q, [rec])
+        result = q.find_dead_code()
+        assert result == [rec]
+
+    def test_with_repo_id(self):
+        q = _make_querier()
+        _mock_session(q, [])
+        q.find_dead_code(repo_id="r1")
+        query = q.driver.session.return_value.__enter__.return_value.run.call_args[0][0]
+        assert "$repo_id" in query
+
+
+# ── analyze_change_impact ───────────────────────────────────────────────────
+
+class TestAnalyzeChangeImpact:
+    def test_query_uses_calls_traversal(self):
+        q = _make_querier()
+        _mock_session(q, [])
+        q.analyze_change_impact("src/a.py:foo")
+        query = q.driver.session.return_value.__enter__.return_value.run.call_args[0][0]
+        assert "CALLS" in query
+        assert "$function_id" in query
+
+    def test_returns_affected_functions(self):
+        q = _make_querier()
+        rec = {"id": "src/b.py:bar", "name": "bar", "filePath": "src/b.py", "startLine": 5, "distance": 1}
+        _mock_session(q, [rec])
+        result = q.analyze_change_impact("src/a.py:foo")
+        assert result == [rec]
+
+
+# ── find_circular_dependencies ─────────────────────────────────────────────
+
+class TestFindCircularDependencies:
+    def test_query_structure(self):
+        q = _make_querier()
+        _mock_session(q, [])
+        q.find_circular_dependencies()
+        query = q.driver.session.return_value.__enter__.return_value.run.call_args[0][0]
+        assert "CALLS" in query
+        assert "cycle" in query.lower()
+
+    def test_returns_cycles(self):
+        q = _make_querier()
+        rec = {"cycle": ["src/a.py:f", "src/b.py:g", "src/a.py:f"], "cycle_length": 2}
+        _mock_session(q, [rec])
+        result = q.find_circular_dependencies()
+        assert result == [rec]
+
+
+# ── get_complexity_hotspots ─────────────────────────────────────────────────
+
+class TestGetComplexityHotspots:
+    def test_query_counts_calls(self):
+        q = _make_querier()
+        _mock_session(q, [])
+        q.get_complexity_hotspots()
+        query = q.driver.session.return_value.__enter__.return_value.run.call_args[0][0]
+        assert "CALLS" in query
+        assert "totalCoupling" in query or "total_coupling" in query.lower() or "out_calls + in_calls" in query
+
+    def test_returns_hotspots(self):
+        q = _make_querier()
+        rec = {"id": "src/a.py:foo", "name": "foo", "filePath": "src/a.py",
+               "complexity": 5, "outgoingCalls": 3, "incomingCalls": 4, "totalCoupling": 7}
+        _mock_session(q, [rec])
+        result = q.get_complexity_hotspots()
+        assert result == [rec]
+
+    def test_with_repo_id(self):
+        q = _make_querier()
+        _mock_session(q, [])
+        q.get_complexity_hotspots(repo_id="r1")
+        query = q.driver.session.return_value.__enter__.return_value.run.call_args[0][0]
+        assert "$repo_id" in query

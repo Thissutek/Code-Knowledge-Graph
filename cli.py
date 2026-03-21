@@ -14,6 +14,23 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def cmd_index(args):
     """Index a repository"""
+    # --git-since: use ProcessingPipeline for git-native incremental indexing
+    if getattr(args, 'git_since', None):
+        from src.pipeline import ProcessingPipeline
+        pipeline = ProcessingPipeline(
+            repo_path=args.path,
+            repo_id=args.id or os.path.basename(os.path.abspath(args.path)),
+            neo4j_uri=args.neo4j_uri,
+            neo4j_user=args.neo4j_user,
+            neo4j_password=args.neo4j_password,
+            skip_embeddings=args.no_embeddings,
+        )
+        print(f"Indexing repository (git changes since {args.git_since}): {args.path}")
+        result = pipeline.process_git_changes(since_commit=args.git_since)
+        print(f"Indexing complete! (mode={result.mode_used.value}, files={result.files_processed})")
+        print(f"Statistics: {json.dumps(result.stats, indent=2, default=str)}")
+        return
+
     from src.neo4j_ingester import ingest_repository
 
     changed_files = None
@@ -173,6 +190,28 @@ def cmd_check_staleness(args):
         q.close()
 
 
+def cmd_repair(args):
+    """Run graph repair and health checks"""
+    from src.repair import GraphRepairTool
+
+    tool = GraphRepairTool(args.neo4j_uri, args.neo4j_user, args.neo4j_password)
+    try:
+        if args.health_check:
+            result = tool.health_check()
+            print(json.dumps(result, indent=2, default=str))
+        if args.validate:
+            result = tool.validate_integrity()
+            print(json.dumps(result, indent=2, default=str))
+        if args.fix_orphans:
+            result = tool.fix_orphaned_nodes(dry_run=args.dry_run)
+            print(json.dumps(result, indent=2))
+        if args.rebuild and args.repo_id and args.repo_path:
+            count = tool.rebuild_relationships(args.repo_id, args.repo_path)
+            print(json.dumps({"relationships_added": count}, indent=2))
+    finally:
+        tool.close()
+
+
 def cmd_hooks_install(args):
     """Install code-kag git hooks into a repository"""
     from src.hooks import HookManager
@@ -248,6 +287,8 @@ Examples:
                               help='List of changed files (relative paths) for incremental indexing')
     index_parser.add_argument('--no-embeddings', action='store_true', default=False,
                               help='Skip vector embedding generation (faster indexing, no semantic search)')
+    index_parser.add_argument('--git-since', metavar='COMMIT',
+                              help='Index only files changed since this git commit (e.g. HEAD~5, abc1234)')
     index_parser.set_defaults(func=cmd_index)
 
     # Search command
@@ -285,6 +326,20 @@ Examples:
     stale_parser.add_argument('--max-age-hours', type=float, default=24.0,
                               help='Maximum acceptable index age in hours (default: 24)')
     stale_parser.set_defaults(func=cmd_check_staleness)
+
+    # Repair command
+    repair_parser = subparsers.add_parser('repair', help='Repair and health-check the graph database')
+    repair_parser.add_argument('--health-check', action='store_true', help='Show database health report')
+    repair_parser.add_argument('--validate', action='store_true', help='Validate referential integrity')
+    repair_parser.add_argument('--fix-orphans', action='store_true', help='Fix orphaned nodes')
+    repair_parser.add_argument('--dry-run', action='store_true', default=True,
+                               help='Dry run (default: True — pass --no-dry-run to actually delete)')
+    repair_parser.add_argument('--no-dry-run', dest='dry_run', action='store_false',
+                               help='Actually delete orphaned nodes (disables dry-run)')
+    repair_parser.add_argument('--rebuild', action='store_true', help='Rebuild relationships for a repo')
+    repair_parser.add_argument('--repo-id', default=None, help='Repository ID (required for --rebuild)')
+    repair_parser.add_argument('--repo-path', default=None, help='Repository path (required for --rebuild)')
+    repair_parser.set_defaults(func=cmd_repair)
 
     # Hooks command group
     hooks_parser = subparsers.add_parser('hooks', help='Manage git hooks')
