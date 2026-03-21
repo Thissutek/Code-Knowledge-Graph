@@ -7,7 +7,7 @@ REPO_ID="{{REPO_ID}}"
 MODE="{{MODE}}"
 NEO4J_URI="{{NEO4J_URI}}"
 NEO4J_USER="{{NEO4J_USER}}"
-NEO4J_PASSWORD="{{NEO4J_PASSWORD}}"
+NEO4J_PASSWORD="${NEO4J_PASSWORD:?Error: NEO4J_PASSWORD must be set in environment before running code-kag hooks}"
 
 LOCKFILE="/tmp/code-kag-reindex-${REPO_ID}.lock"
 LOGFILE="/tmp/code-kag-reindex-${REPO_ID}.log"
